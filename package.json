@@ -11,6 +11,7 @@
     "src",
     "README.md",
     "TUTORIAL.md",
+    "LICENSE",
     "envcompile.config.example.yaml"
   ],
   "scripts": {
