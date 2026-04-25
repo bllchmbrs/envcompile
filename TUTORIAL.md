@@ -318,6 +318,45 @@ CLOUDFLARE_ZONE_ID="prod-zone-789"
 
 This proves the deployment bundle is self-contained: it has the encrypted compiled file plus one deployment-specific private key.
 
+## Run a Program With the Compiled Target
+
+Decryption is a useful proof, but deployments usually do not print secrets. They start a process with the compiled env file loaded.
+
+Create a tiny example program:
+
+```bash
+cat > run_my_thing.py <<'EOF'
+import os
+
+print("stripe key:", os.environ["STRIPE_SECRET_KEY"])
+print("cloudflare zone:", os.environ["CLOUDFLARE_ZONE_ID"])
+EOF
+```
+
+Run the program through dotenvx with the compiled encrypted env file and its generated target key file:
+
+```bash
+npm exec -- dotenvx run \
+  -f compiled_env/prod/.env.api \
+  -fk tutorial_secrets/targets/prod/.env.api.keys \
+  -- python3 run_my_thing.py
+```
+
+Expected output:
+
+```text
+stripe key: sk_live_prod_789
+cloudflare zone: prod-zone-789
+```
+
+That is the end-to-end deployment shape:
+
+1. Commit or ship `compiled_env/prod/.env.api`.
+2. Store `DOTENV_PRIVATE_KEY_API` from `tutorial_secrets/targets/prod/.env.api.keys` in the runtime secret store.
+3. Start your real process with `dotenvx run -f compiled_env/prod/.env.api -- your_command`.
+
+When the runtime already exports `DOTENV_PRIVATE_KEY_API`, you can omit `-fk`.
+
 ## Inspect Without Showing Values
 
 By default, `inspect` shows names but not secret values:
