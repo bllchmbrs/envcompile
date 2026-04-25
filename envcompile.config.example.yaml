@@ -1,0 +1,39 @@
+version: 1
+
+sourceDir: source_env_vars
+keysDir: ~/secrets/project
+
+environments:
+  - dev
+  - staging
+  - prod
+
+keyFilePatterns:
+  source: source_env_vars/{env}/.env.{source}.keys
+  target: targets/{env}/.env.{target}.keys
+
+targets:
+  api:
+    description: Runtime env for API deployment
+    output: compiled_env/{env}/.env.api
+    keyFile: targets/{env}/.env.api.keys
+    sources:
+      - stripe
+      - cloudflare
+    required:
+      - STRIPE_SECRET_KEY
+      - CLOUDFLARE_API_TOKEN
+      - CLOUDFLARE_ZONE_ID
+    duplicatePolicy: error
+    ordering: config
+
+  web:
+    description: Runtime env for web deployment
+    output: compiled_env/{env}/.env.web
+    keyFile: targets/{env}/.env.web.keys
+    sources:
+      - stripe
+    required:
+      - STRIPE_PUBLISHABLE_KEY
+    duplicatePolicy: error
+    ordering: config

@@ -1,0 +1,36 @@
+{
+  "name": "envcompile",
+  "version": "0.1.0",
+  "description": "Compose encrypted dotenvx source files into deployment-specific encrypted env files.",
+  "type": "module",
+  "bin": {
+    "envcompile": "./bin/envcompile.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "TUTORIAL.md",
+    "envcompile.config.example.yaml"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check bin/envcompile.js && node --check src/*.js"
+  },
+  "keywords": [
+    "dotenvx",
+    "dotenv",
+    "secrets",
+    "env",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@dotenvx/dotenvx": "^1.63.0",
+    "yaml": "^2.8.0"
+  }
+}

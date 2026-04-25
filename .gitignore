@@ -1,0 +1,14 @@
+node_modules/
+coverage/
+dist/
+.DS_Store
+
+# Generated target env files may be committed intentionally in some repos.
+# Keep private keys out of git.
+.env.keys
+*.env.keys
+*.keys
+
+# Local scratch output.
+.envcompile/
+tmp/
