@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { compileTarget, loadComposedTarget } from '../src/engine.js';
+import { compileTarget, lintTargets, loadComposedTarget } from '../src/engine.js';
 
 test('loadComposedTarget merges decrypted source files and validates required keys', async () => {
   const fixture = await makeFixture();
@@ -29,6 +29,41 @@ test('loadComposedTarget reports duplicates when duplicatePolicy is error', asyn
 
   assert.equal(composed.ok, false);
   assert.equal(composed.diagnostics[0].type, 'duplicate');
+});
+
+test('lintTargets warns on duplicates allowed by duplicatePolicy', async () => {
+  const fixture = await makeFixture({
+    cloudflare: 'STRIPE_SECRET_KEY=duplicate\nCLOUDFLARE_API_TOKEN=cf_dev\n',
+    duplicatePolicy: 'first-wins',
+  });
+
+  const [result] = await lintTargets(fixture.config, {
+    dotenvxBin: fixture.dotenvxBin,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.duplicatePolicy, 'first-wins');
+  assert.deepEqual(result.diagnostics, [{
+    type: 'duplicate',
+    key: 'STRIPE_SECRET_KEY',
+    firstSource: 'stripe',
+    secondSource: 'cloudflare',
+  }]);
+});
+
+test('lintTargets strict mode fails on duplicate keys', async () => {
+  const fixture = await makeFixture({
+    cloudflare: 'STRIPE_SECRET_KEY=duplicate\nCLOUDFLARE_API_TOKEN=cf_dev\n',
+    duplicatePolicy: 'first-wins',
+  });
+
+  const [result] = await lintTargets(fixture.config, {
+    dotenvxBin: fixture.dotenvxBin,
+    strict: true,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.diagnostics[0].type, 'duplicate');
 });
 
 test('compileTarget writes encrypted output and generated key file', async () => {
@@ -95,7 +130,7 @@ process.exit(9);
           output: 'compiled_env/{env}/.env.api',
           keyFile: 'targets/{env}/.env.api.keys',
           required: ['STRIPE_SECRET_KEY', 'CLOUDFLARE_API_TOKEN'],
-          duplicatePolicy: 'error',
+          duplicatePolicy: overrides.duplicatePolicy || 'error',
           ordering: 'config',
         },
       },

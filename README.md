@@ -138,6 +138,17 @@ envcompile check api
 envcompile check api --env staging
 ```
 
+Warn when two sources for a target define the same key:
+
+```bash
+envcompile lint
+envcompile lint api --env prod
+envcompile lint api --env prod --strict
+```
+
+`lint` warns about duplicate keys even when a target allows duplicates with `duplicatePolicy`.
+With `--strict`, duplicate keys fail the command.
+
 Compare the composed key set across environments:
 
 ```bash
@@ -168,8 +179,11 @@ envcompile inspect api --env prod --show-values --yes
 Each target can choose one duplicate policy:
 
 - `error`: duplicate keys fail validation.
-- `first-wins`: keep the first source value.
-- `last-wins`: keep the last source value.
+- `first-wins`: keep the first source value from the target's `sources` order.
+- `last-wins`: keep the last source value from the target's `sources` order.
+
+When duplicates are allowed, the order of `sources` in the target config is the compilation hierarchy.
+Run `envcompile lint --strict` in CI if duplicate key names should never be allowed.
 
 ## Safety notes
 

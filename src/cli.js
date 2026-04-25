@@ -6,6 +6,7 @@ import {
   compareTarget,
   compileTarget,
   getTarget,
+  lintTargets,
   loadComposedTarget,
   resolveSourceFile,
   resolveSourceKeyFile,
@@ -23,6 +24,7 @@ Usage:
   envcompile targets [--config <path>]
   envcompile compile <target> --env <env> [--out <path>] [--dry-run] [--force] [--print-key] [--dotenvx <bin>]
   envcompile check [target] [--env <env>] [--dotenvx <bin>]
+  envcompile lint [target] [--env <env>] [--strict] [--dotenvx <bin>]
   envcompile compare [target] [--env <a,b,c>] [--source <source>] [--dotenvx <bin>]
   envcompile inspect <target> --env <env> [--show-values --yes] [--dotenvx <bin>]
 
@@ -59,6 +61,9 @@ export async function main(argv, io = defaultIo()) {
     case 'check':
       await checkCommand(positional, options, io);
       break;
+    case 'lint':
+      await lintCommand(positional, options, io);
+      break;
     case 'compare':
       await compareCommand(positional, options, io);
       break;
@@ -84,7 +89,7 @@ export function parseArgs(argv) {
 
     const [rawName, inlineValue] = token.slice(2).split(/=(.*)/s, 2);
     const name = rawName.replace(/-([a-z])/g, (_, char) => char.toUpperCase());
-    if (['dryRun', 'force', 'printKey', 'showValues', 'yes'].includes(name)) {
+    if (['dryRun', 'force', 'printKey', 'showValues', 'strict', 'yes'].includes(name)) {
       options[name] = true;
       continue;
     }
@@ -198,6 +203,34 @@ async function checkCommand(positional, options, io) {
   if (!ok) throw new EnvcompileError('check failed', 1);
 }
 
+async function lintCommand(positional, options, io) {
+  const { config } = await loadConfig(process.cwd(), options.config);
+  const targetName = positional[0];
+  const results = await lintTargets(config, {
+    targetName,
+    env: options.env,
+    dotenvxBin: options.dotenvx,
+    strict: Boolean(options.strict),
+  });
+
+  let ok = true;
+  for (const result of results) {
+    if (result.diagnostics.length === 0) {
+      io.out(`ok ${result.targetName}/${result.env}`);
+      continue;
+    }
+
+    if (!result.ok) ok = false;
+    const prefix = result.ok ? 'warn' : 'fail';
+    io.err(`${prefix} ${result.targetName}/${result.env}`);
+    for (const item of result.diagnostics) {
+      io.err(`  ${formatLintDiagnosticLine(item, result.duplicatePolicy)}`);
+    }
+  }
+
+  if (!ok) throw new EnvcompileError('lint failed', 1);
+}
+
 async function compareCommand(positional, options, io) {
   const { config } = await loadConfig(process.cwd(), options.config);
   const targetName = positional[0];
@@ -277,6 +310,27 @@ function formatDiagnosticLine(item) {
     return `missing required ${item.key}`;
   }
   return item.message || String(item.type);
+}
+
+function formatLintDiagnosticLine(item, duplicatePolicy) {
+  if (item.type === 'duplicate') {
+    const hierarchy = formatDuplicateHierarchy(item, duplicatePolicy);
+    return `duplicate ${item.key}: ${item.firstSource} and ${item.secondSource}${hierarchy}`;
+  }
+  return item.message || String(item.type);
+}
+
+function formatDuplicateHierarchy(item, duplicatePolicy) {
+  if (duplicatePolicy === 'first-wins') {
+    return `; ${item.firstSource} wins because it appears earlier in target.sources`;
+  }
+  if (duplicatePolicy === 'last-wins') {
+    return `; ${item.secondSource} wins because it appears later in target.sources`;
+  }
+  if (duplicatePolicy === 'error') {
+    return '; compilation fails unless duplicatePolicy allows duplicates';
+  }
+  return '';
 }
 
 function defaultIo() {

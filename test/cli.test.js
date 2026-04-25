@@ -13,3 +13,14 @@ test('parseArgs supports positional arguments and long options', () => {
     },
   });
 });
+
+test('parseArgs supports lint strict flag', () => {
+  assert.deepEqual(parseArgs(['lint', 'api', '--env', 'prod', '--strict']), {
+    command: 'lint',
+    positional: ['api'],
+    options: {
+      env: 'prod',
+      strict: true,
+    },
+  });
+});

@@ -186,6 +186,39 @@ export async function checkTargets(config, options = {}) {
   return results;
 }
 
+export async function lintTargets(config, options = {}) {
+  const targetNames = options.targetName ? [options.targetName] : Object.keys(config.targets);
+  const envs = options.env ? [options.env] : config.environments;
+  const results = [];
+
+  for (const targetName of targetNames) {
+    getTarget(config, targetName);
+    for (const env of envs) {
+      try {
+        const composed = await loadComposedTarget(config, targetName, env, options);
+        const diagnostics = composed.diagnostics.filter((item) => item.type === 'duplicate');
+        results.push({
+          targetName,
+          env,
+          ok: diagnostics.length === 0 || !options.strict,
+          diagnostics,
+          duplicatePolicy: composed.target.duplicatePolicy,
+        });
+      } catch (error) {
+        results.push({
+          targetName,
+          env,
+          ok: false,
+          diagnostics: [{ type: 'error', message: error.message }],
+          duplicatePolicy: null,
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
 export async function compareTarget(config, targetName, options = {}) {
   const envs = options.envs || config.environments;
   const snapshots = [];

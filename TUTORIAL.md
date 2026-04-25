@@ -248,6 +248,15 @@ Compare just one source across environments:
 envcompile compare --source stripe
 ```
 
+Lint for duplicate key names across the sources that make up each target:
+
+```bash
+envcompile lint
+envcompile lint api --env prod --strict
+```
+
+`lint` warns when two sources define the same key, such as two Stripe API key entries with the same env var name. With `--strict`, duplicate key names fail the command. If a target intentionally allows duplicates with `duplicatePolicy: first-wins` or `duplicatePolicy: last-wins`, the order of `sources` in the target config is the compilation hierarchy.
+
 ## Compile a Deployment Env File
 
 First do a dry run:
