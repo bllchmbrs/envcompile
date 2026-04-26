@@ -235,8 +235,8 @@ export async function loadComposedTarget(config, targetName, env, options = {}) 
   for (const source of target.sources) {
     const sourceFile = resolveSourceFile(config, env, source);
     const sourceKeyFile = resolveSourceKeyFile(config, env, source);
-    await assertReadable(sourceFile, `Missing source file for ${env}/${source}`);
-    await assertReadable(sourceKeyFile, `Missing key file for ${env}/${source}`);
+    await assertReadable(sourceFile, `compile ${targetName}/${env}: missing source file "${source}"`);
+    await assertReadable(sourceKeyFile, `compile ${targetName}/${env}: missing key file for source "${source}"`);
 
     const keyText = await fs.readFile(sourceKeyFile, 'utf8');
     const privateKeys = parsePrivateKeys(keyText);
@@ -310,8 +310,9 @@ export async function compileTarget(config, targetName, env, options = {}) {
     return { ...composed, outputFile, keyFile, dryRun: true };
   }
 
-  await assertWritableDestination(outputFile, options.force, 'output');
-  await assertWritableDestination(keyFile, options.force, 'target key file');
+  const context = `${targetName}/${env}`;
+  await assertWritableDestination(outputFile, options.force, `compile ${context}: output file`);
+  await assertWritableDestination(keyFile, options.force, `compile ${context}: key file`);
 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-'));
   try {
