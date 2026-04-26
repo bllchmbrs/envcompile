@@ -12,6 +12,7 @@ import {
   loadComposedTarget,
   resolveSourceFile,
   resolveSourceKeyFile,
+  resolveTargetOutput,
   validateConfig,
 } from './engine.js';
 import { EnvcompileError, configError } from './errors.js';
@@ -469,13 +470,22 @@ async function preCommitCommand(options, io) {
   io.out(`Installed pre-commit hook at ${toDisplayPath(hookPath)}`);
 }
 
-const GITIGNORE_LINES = [
-  '# envcompile: allow .env files but ignore private keys',
+const TARGET_GITIGNORE_LINES = [
+  '# envcompile: ignore private keys',
   '*.env.keys',
   '.env.keys',
 ];
 
-async function updateGitignore(dirPath) {
+function buildSourceGitignoreLines(sources) {
+  const lines = ['# envcompile: ignore private keys'];
+  lines.push('.env.keys');
+  for (const source of [...sources].sort()) {
+    lines.push(`.env.${source}.keys`);
+  }
+  return lines;
+}
+
+async function updateGitignore(dirPath, lines) {
   const gitignorePath = path.join(dirPath, '.gitignore');
   let existing = '';
   try {
@@ -484,8 +494,8 @@ async function updateGitignore(dirPath) {
     if (error.code !== 'ENOENT') throw error;
   }
 
-  const lines = existing.split('\n');
-  const toAdd = GITIGNORE_LINES.filter((line) => !lines.includes(line));
+  const existingLines = existing.split('\n');
+  const toAdd = lines.filter((line) => !existingLines.includes(line));
 
   if (toAdd.length === 0) return false;
 
@@ -499,27 +509,52 @@ async function gitignoreCommand(options, io) {
   const { config } = await loadConfig(process.cwd(), options.config);
   const sourceDir = config.sourceDir;
 
-  // Get all environment subdirectories under sourceDir
-  const dirs = [sourceDir];
+  // Collect all source names from all targets
+  const allSources = new Set();
+  for (const target of Object.values(config.targets)) {
+    for (const source of target.sources) allSources.add(source);
+  }
+
+  const sourceGitignoreLines = buildSourceGitignoreLines(allSources);
+
+  // Update .gitignore in sourceDir and each environment subdirectory
+  const sourceDirs = [sourceDir];
   for (const env of config.environments) {
-    dirs.push(path.join(sourceDir, env));
+    sourceDirs.push(path.join(sourceDir, env));
   }
 
   let updated = 0;
-  for (const dir of dirs) {
+  for (const dir of sourceDirs) {
     try {
       await fs.access(dir);
     } catch {
       continue;
     }
-    if (await updateGitignore(dir)) {
+    if (await updateGitignore(dir, sourceGitignoreLines)) {
+      io.out(`Updated ${toDisplayPath(path.join(dir, '.gitignore'))}`);
+      updated++;
+    }
+  }
+
+  // Update .gitignore in target output directories with *.env.keys
+  const targetDirs = new Set();
+  for (const [targetName] of Object.entries(config.targets)) {
+    for (const env of config.environments) {
+      const outputFile = resolveTargetOutput(config, targetName, env);
+      targetDirs.add(path.dirname(outputFile));
+    }
+  }
+
+  for (const dir of targetDirs) {
+    await fs.mkdir(dir, { recursive: true });
+    if (await updateGitignore(dir, TARGET_GITIGNORE_LINES)) {
       io.out(`Updated ${toDisplayPath(path.join(dir, '.gitignore'))}`);
       updated++;
     }
   }
 
   if (updated === 0) {
-    io.out('.gitignore already has envcompile entries in all source directories.');
+    io.out('.gitignore already has envcompile entries in all source and target directories.');
   }
 }
 
