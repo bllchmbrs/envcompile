@@ -91,17 +91,34 @@ test('pre-commit hook detects unencrypted env files', async () => {
   }
 });
 
-test('gitignore command adds key ignore entries', async () => {
+test('gitignore command adds key ignore entries to source directories', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-cli-'));
   const origCwd = process.cwd();
   process.chdir(tmpDir);
   try {
+    const sourceDir = path.join(tmpDir, 'source_env_vars');
+    await fs.mkdir(path.join(sourceDir, 'dev'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, 'envcompile.config.json'), JSON.stringify({
+      version: 1,
+      sourceDir: 'source_env_vars',
+      keysDir: 'source_env_vars',
+      environments: ['dev'],
+      targets: { api: { sources: ['app'], output: 'compiled/{env}/.env.api' } },
+    }));
+
     const output = [];
     await main(['gitignore'], { out: (msg) => output.push(msg), err: () => {} });
 
-    const content = await fs.readFile(path.join(tmpDir, '.gitignore'), 'utf8');
+    // Should update .gitignore in sourceDir and env subdirectories
+    const content = await fs.readFile(path.join(sourceDir, '.gitignore'), 'utf8');
     assert.ok(content.includes('*.env.keys'));
     assert.ok(content.includes('.env.keys'));
+
+    const devContent = await fs.readFile(path.join(sourceDir, 'dev', '.gitignore'), 'utf8');
+    assert.ok(devContent.includes('*.env.keys'));
+
+    // Should NOT create .gitignore in project root
+    await assert.rejects(fs.readFile(path.join(tmpDir, '.gitignore'), 'utf8'), { code: 'ENOENT' });
 
     // Running again should be idempotent
     const output2 = [];

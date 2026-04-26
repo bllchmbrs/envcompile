@@ -89,7 +89,7 @@ export async function main(argv, io = defaultIo()) {
       await inspectCommand(positional, options, io);
       break;
     case 'gitignore':
-      await gitignoreCommand(io);
+      await gitignoreCommand(options, io);
       break;
     case 'pre-commit':
       await preCommitCommand(options, io);
@@ -475,8 +475,8 @@ const GITIGNORE_LINES = [
   '.env.keys',
 ];
 
-async function gitignoreCommand(io) {
-  const gitignorePath = path.resolve(process.cwd(), '.gitignore');
+async function updateGitignore(dirPath) {
+  const gitignorePath = path.join(dirPath, '.gitignore');
   let existing = '';
   try {
     existing = await fs.readFile(gitignorePath, 'utf8');
@@ -487,15 +487,40 @@ async function gitignoreCommand(io) {
   const lines = existing.split('\n');
   const toAdd = GITIGNORE_LINES.filter((line) => !lines.includes(line));
 
-  if (toAdd.length === 0) {
-    io.out('.gitignore already has envcompile entries.');
-    return;
-  }
+  if (toAdd.length === 0) return false;
 
   const suffix = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
   const prefix = existing.length > 0 ? '\n' : '';
   await fs.writeFile(gitignorePath, existing + suffix + prefix + toAdd.join('\n') + '\n');
-  io.out(`Updated ${toDisplayPath(gitignorePath)}`);
+  return true;
+}
+
+async function gitignoreCommand(options, io) {
+  const { config } = await loadConfig(process.cwd(), options.config);
+  const sourceDir = config.sourceDir;
+
+  // Get all environment subdirectories under sourceDir
+  const dirs = [sourceDir];
+  for (const env of config.environments) {
+    dirs.push(path.join(sourceDir, env));
+  }
+
+  let updated = 0;
+  for (const dir of dirs) {
+    try {
+      await fs.access(dir);
+    } catch {
+      continue;
+    }
+    if (await updateGitignore(dir)) {
+      io.out(`Updated ${toDisplayPath(path.join(dir, '.gitignore'))}`);
+      updated++;
+    }
+  }
+
+  if (updated === 0) {
+    io.out('.gitignore already has envcompile entries in all source directories.');
+  }
 }
 
 function defaultIo() {
