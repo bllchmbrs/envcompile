@@ -5,11 +5,14 @@ import {
   checkTargets,
   compareTarget,
   compileTarget,
+  encryptSources,
+  decryptSources,
   getTarget,
   lintTargets,
   loadComposedTarget,
   resolveSourceFile,
   resolveSourceKeyFile,
+  validateConfig,
 } from './engine.js';
 import { EnvcompileError, configError } from './errors.js';
 import { parsePrivateKeys } from './dotenv.js';
@@ -26,6 +29,9 @@ Usage:
   envcompile check [target] [--env <env>] [--dotenvx <bin>]
   envcompile lint [target] [--env <env>] [--strict] [--dotenvx <bin>]
   envcompile compare [target] [--env <a,b,c>] [--source <source>] [--dotenvx <bin>]
+  envcompile validate [--config <path>]
+  envcompile encrypt [source] [--env <env>] [--config <path>] [--dotenvx <bin>]
+  envcompile decrypt [source] [--env <env>] [--config <path>] [--dotenvx <bin>]
   envcompile inspect <target> --env <env> [--show-values --yes] [--dotenvx <bin>]
 
 Global options:
@@ -66,6 +72,15 @@ export async function main(argv, io = defaultIo()) {
       break;
     case 'compare':
       await compareCommand(positional, options, io);
+      break;
+    case 'validate':
+      await validateCommand(options, io);
+      break;
+    case 'encrypt':
+      await encryptCommand(positional, options, io);
+      break;
+    case 'decrypt':
+      await decryptCommand(positional, options, io);
       break;
     case 'inspect':
       await inspectCommand(positional, options, io);
@@ -247,6 +262,61 @@ async function compareCommand(positional, options, io) {
   });
 
   renderComparison(comparison, io);
+}
+
+async function validateCommand(options, io) {
+  const { config } = await loadConfig(process.cwd(), options.config);
+  const results = await validateConfig(config);
+
+  let ok = true;
+  for (const result of results) {
+    if (result.ok) {
+      io.out(`ok ${result.label}`);
+    } else {
+      ok = false;
+      io.err(`fail ${result.label}`);
+      for (const message of result.errors) {
+        io.err(`  ${message}`);
+      }
+    }
+  }
+
+  if (!ok) throw new EnvcompileError('validate failed', 1);
+  io.out('Config is valid.');
+}
+
+async function encryptCommand(positional, options, io) {
+  const { config } = await loadConfig(process.cwd(), options.config);
+  const results = await encryptSources(config, {
+    source: positional[0],
+    env: options.env,
+    dotenvxBin: options.dotenvx,
+  });
+
+  for (const result of results) {
+    if (result.skipped) {
+      io.out(`skip ${result.env}/${result.source} (already encrypted)`);
+    } else {
+      io.out(`encrypted ${result.env}/${result.source}`);
+    }
+  }
+}
+
+async function decryptCommand(positional, options, io) {
+  const { config } = await loadConfig(process.cwd(), options.config);
+  const results = await decryptSources(config, {
+    source: positional[0],
+    env: options.env,
+    dotenvxBin: options.dotenvx,
+  });
+
+  for (const result of results) {
+    if (result.skipped) {
+      io.out(`skip ${result.env}/${result.source} (already decrypted)`);
+    } else {
+      io.out(`decrypted ${result.env}/${result.source}`);
+    }
+  }
 }
 
 async function inspectCommand(positional, options, io) {

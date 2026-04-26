@@ -6,6 +6,160 @@ import { parseDotenv, parsePrivateKeys, stringifyDotenv, isPublicKeyName } from 
 import { decryptFile, encryptFile } from './dotenvx.js';
 import { renderTemplate, resolveFrom } from './paths.js';
 
+export async function validateConfig(config) {
+  const results = [];
+
+  // Check that sourceDir exists
+  try {
+    await fs.access(config.sourceDir);
+  } catch {
+    results.push({ label: 'sourceDir', ok: false, errors: [`Directory not found: ${config.sourceDir}`] });
+  }
+
+  // Check that keysDir exists
+  try {
+    await fs.access(config.keysDir);
+  } catch {
+    results.push({ label: 'keysDir', ok: false, errors: [`Directory not found: ${config.keysDir}`] });
+  }
+
+  // For each target × env, check source files and key files exist
+  for (const [targetName, target] of Object.entries(config.targets)) {
+    for (const env of config.environments) {
+      const errors = [];
+
+      for (const source of target.sources) {
+        const sourceFile = resolveSourceFile(config, env, source);
+        try {
+          await fs.access(sourceFile);
+        } catch {
+          errors.push(`Missing source file: ${sourceFile}`);
+        }
+
+        const keyFile = resolveSourceKeyFile(config, env, source);
+        try {
+          await fs.access(keyFile);
+        } catch {
+          errors.push(`Missing source key file: ${keyFile}`);
+        }
+      }
+
+      // Check that target output directory is writable (parent exists)
+      try {
+        const outputFile = resolveTargetOutput(config, targetName, env);
+        const outputDir = path.dirname(outputFile);
+        // Just check the parent of the parent exists if the dir doesn't
+        try {
+          await fs.access(outputDir);
+        } catch {
+          // Not an error — compile creates it. Skip.
+        }
+      } catch (err) {
+        // Per-env map missing entry
+        errors.push(err.message);
+      }
+
+      // Check target key file resolution works
+      try {
+        resolveTargetKeyFile(config, targetName, env);
+      } catch (err) {
+        errors.push(err.message);
+      }
+
+      const label = `${targetName}/${env}`;
+      if (errors.length > 0) {
+        results.push({ label, ok: false, errors });
+      } else {
+        results.push({ label, ok: true, errors: [] });
+      }
+    }
+  }
+
+  return results;
+}
+
+export function isFileEncrypted(text) {
+  return /^[A-Za-z_][A-Za-z0-9_]*\s*=\s*"?encrypted:/m.test(text);
+}
+
+function allSourceEnvPairs(config, options = {}) {
+  const envs = options.env ? [options.env] : config.environments;
+  const allSources = new Set();
+  for (const target of Object.values(config.targets)) {
+    for (const source of target.sources) allSources.add(source);
+  }
+  const sources = options.source ? [options.source] : [...allSources];
+
+  if (options.env) assertEnvironment(config, options.env);
+  if (options.source && !allSources.has(options.source)) {
+    throw configError(`Unknown source "${options.source}". Available sources: ${[...allSources].join(', ')}`);
+  }
+
+  const pairs = [];
+  for (const env of envs) {
+    for (const source of sources) {
+      pairs.push({ env, source });
+    }
+  }
+  return pairs;
+}
+
+export async function encryptSources(config, options = {}) {
+  const pairs = allSourceEnvPairs(config, options);
+  const results = [];
+
+  for (const { env, source } of pairs) {
+    const sourceFile = resolveSourceFile(config, env, source);
+    const text = await fs.readFile(sourceFile, 'utf8');
+
+    if (isFileEncrypted(text)) {
+      results.push({ env, source, skipped: true });
+      continue;
+    }
+
+    await encryptFile({
+      dotenvxBin: options.dotenvxBin,
+      filePath: sourceFile,
+      cwd: path.dirname(sourceFile),
+    });
+    results.push({ env, source, skipped: false });
+  }
+
+  return results;
+}
+
+export async function decryptSources(config, options = {}) {
+  const pairs = allSourceEnvPairs(config, options);
+  const results = [];
+
+  for (const { env, source } of pairs) {
+    const sourceFile = resolveSourceFile(config, env, source);
+    const sourceKeyFile = resolveSourceKeyFile(config, env, source);
+    const text = await fs.readFile(sourceFile, 'utf8');
+
+    if (!isFileEncrypted(text)) {
+      results.push({ env, source, skipped: true });
+      continue;
+    }
+
+    const keyText = await fs.readFile(sourceKeyFile, 'utf8');
+    const privateKeys = parsePrivateKeys(keyText);
+    if (Object.keys(privateKeys).length === 0) {
+      throw new EnvcompileError(`No DOTENV_PRIVATE_KEY entries found in ${sourceKeyFile}`, 1);
+    }
+
+    const decrypted = await decryptFile({
+      dotenvxBin: options.dotenvxBin,
+      filePath: sourceFile,
+      privateKeys,
+    });
+    await fs.writeFile(sourceFile, decrypted, { mode: 0o600 });
+    results.push({ env, source, skipped: false });
+  }
+
+  return results;
+}
+
 export function getTarget(config, targetName) {
   const target = config.targets[targetName];
   if (!target) {

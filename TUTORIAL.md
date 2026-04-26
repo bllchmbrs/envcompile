@@ -98,6 +98,21 @@ At this point the source files are plaintext. The next section encrypts them.
 
 ## Encrypt Source Files
 
+With the config in place (see next section), you can encrypt all source files at once:
+
+```bash
+envcompile encrypt
+```
+
+Or encrypt a single source or environment:
+
+```bash
+envcompile encrypt stripe
+envcompile encrypt stripe --env prod
+```
+
+Files that are already encrypted are skipped. However, for this tutorial we need the config first, so we will encrypt manually and then set up the config.
+
 For each source file, run `npx dotenvx encrypt`, move the generated `.env.keys` file into `tutorial_secrets`, then remove `.env.keys` from the repo root.
 
 ```bash
@@ -384,23 +399,24 @@ envcompile inspect api --env prod --show-values --yes
 
 To rotate or change a value, update the single source file that owns it.
 
-First, decrypt the production Stripe source to stdout so you can see the current value:
+First, decrypt the production Stripe source in place so you can see and edit the current values:
 
 ```bash
-set -a
-. tutorial_secrets/source_env_vars/prod/.env.stripe.keys
-set +a
-
-npx dotenvx decrypt -f source_env_vars/prod/.env.stripe --stdout
+envcompile decrypt stripe --env prod
+cat source_env_vars/prod/.env.stripe
 ```
 
-Change the production Stripe secret in the encrypted source file:
+Change the production Stripe secret in the decrypted source file:
 
 ```bash
-npx dotenvx set STRIPE_SECRET_KEY sk_live_prod_rotated_001 -f source_env_vars/prod/.env.stripe
+sed -i '' 's/sk_live_prod_789/sk_live_prod_rotated_001/' source_env_vars/prod/.env.stripe
 ```
 
-Recompile the API production target:
+Re-encrypt and recompile the API production target:
+
+```bash
+envcompile encrypt stripe --env prod
+```
 
 ```bash
 envcompile compile api --env prod --force --print-key
@@ -431,11 +447,7 @@ The important part: only `source_env_vars/prod/.env.stripe` needed to change. An
 Decrypt the production Cloudflare source in place:
 
 ```bash
-set -a
-. tutorial_secrets/source_env_vars/prod/.env.cloudflare.keys
-set +a
-
-npx dotenvx decrypt -f source_env_vars/prod/.env.cloudflare
+envcompile decrypt cloudflare --env prod
 ```
 
 Add a duplicate Stripe key to the Cloudflare source:
@@ -446,12 +458,10 @@ STRIPE_SECRET_KEY=wrong_owner
 EOF
 ```
 
-Re-encrypt the Cloudflare source. This keeps the tutorial simple by generating a fresh source key for the changed file.
+Re-encrypt the Cloudflare source:
 
 ```bash
-rm -f .env.keys
-npx dotenvx encrypt -f source_env_vars/prod/.env.cloudflare
-mv .env.keys tutorial_secrets/source_env_vars/prod/.env.cloudflare.keys
+envcompile encrypt cloudflare --env prod
 ```
 
 Run validation:
@@ -471,15 +481,9 @@ envcompile: check failed
 Fix it by decrypting the Cloudflare source, removing the duplicate key, and re-encrypting:
 
 ```bash
-set -a
-. tutorial_secrets/source_env_vars/prod/.env.cloudflare.keys
-set +a
-
-npx dotenvx decrypt -f source_env_vars/prod/.env.cloudflare
+envcompile decrypt cloudflare --env prod
 perl -0pi -e 's/\nSTRIPE_SECRET_KEY=wrong_owner\n/\n/' source_env_vars/prod/.env.cloudflare
-rm -f .env.keys
-npx dotenvx encrypt -f source_env_vars/prod/.env.cloudflare
-mv .env.keys tutorial_secrets/source_env_vars/prod/.env.cloudflare.keys
+envcompile encrypt cloudflare --env prod
 ```
 
 Validation passes again:

@@ -70,6 +70,23 @@ targets:
     ordering: config
 ```
 
+`output` and `keyFile` can also be per-environment maps instead of templates:
+
+```yaml
+targets:
+  api:
+    output:
+      dev: compiled_env/dev/.env.api
+      staging: compiled_env/staging/.env.api
+      prod: compiled_env/prod/.env.api
+    keyFile:
+      dev: targets/dev/.env.api.keys
+      prod: targets/prod/.env.api.keys
+    sources:
+      - stripe
+      - cloudflare
+```
+
 Source files resolve to:
 
 ```text
@@ -161,6 +178,32 @@ Compare one source across environments:
 ```bash
 envcompile compare --source stripe
 ```
+
+Validate that source files, key files, and target output paths are correctly configured:
+
+```bash
+envcompile validate
+```
+
+Encrypt source files that are not yet encrypted:
+
+```bash
+envcompile encrypt
+envcompile encrypt stripe
+envcompile encrypt stripe --env prod
+```
+
+Files that are already encrypted are skipped.
+
+Decrypt source files in-place for editing:
+
+```bash
+envcompile decrypt
+envcompile decrypt stripe
+envcompile decrypt stripe --env prod
+```
+
+Files that are already decrypted are skipped.
 
 Inspect a target without showing secret values:
 
