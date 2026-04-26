@@ -71,7 +71,7 @@ export function normalizeConfig(raw, configDir) {
   const sourceDir = resolveFrom(configDir, raw.sourceDir);
   const keysDir = resolveFrom(configDir, raw.keysDir);
   const keyFilePatterns = {
-    source: 'source_env_vars/{env}/.env.{source}.keys',
+    source: '{env}/.env.{source}.keys',
     target: 'targets/{env}/.env.{target}.keys',
     ...(raw.keyFilePatterns || {}),
   };

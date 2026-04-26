@@ -84,12 +84,12 @@ async function makeFixture(overrides = {}) {
   const sourceDir = path.join(root, 'source_env_vars');
   const keysDir = path.join(root, 'keys');
   await fs.mkdir(path.join(sourceDir, 'dev'), { recursive: true });
-  await fs.mkdir(path.join(keysDir, 'source_env_vars/dev'), { recursive: true });
+  await fs.mkdir(path.join(keysDir, 'dev'), { recursive: true });
 
   await fs.writeFile(path.join(sourceDir, 'dev/.env.stripe'), overrides.stripe || 'STRIPE_SECRET_KEY=sk_dev\n');
   await fs.writeFile(path.join(sourceDir, 'dev/.env.cloudflare'), overrides.cloudflare || 'CLOUDFLARE_API_TOKEN=cf_dev\n');
-  await fs.writeFile(path.join(keysDir, 'source_env_vars/dev/.env.stripe.keys'), 'DOTENV_PRIVATE_KEY_STRIPE=private\n');
-  await fs.writeFile(path.join(keysDir, 'source_env_vars/dev/.env.cloudflare.keys'), 'DOTENV_PRIVATE_KEY_CLOUDFLARE=private\n');
+  await fs.writeFile(path.join(keysDir, 'dev/.env.stripe.keys'), 'DOTENV_PRIVATE_KEY_STRIPE=private\n');
+  await fs.writeFile(path.join(keysDir, 'dev/.env.cloudflare.keys'), 'DOTENV_PRIVATE_KEY_CLOUDFLARE=private\n');
 
   const dotenvxBin = path.join(root, 'fake-dotenvx.js');
   await fs.writeFile(dotenvxBin, `#!/usr/bin/env node
@@ -120,7 +120,7 @@ process.exit(9);
       keysDir,
       environments: ['dev'],
       keyFilePatterns: {
-        source: 'source_env_vars/{env}/.env.{source}.keys',
+        source: '{env}/.env.{source}.keys',
         target: 'targets/{env}/.env.{target}.keys',
       },
       targets: {

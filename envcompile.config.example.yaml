@@ -9,7 +9,7 @@ environments:
   - prod
 
 keyFilePatterns:
-  source: source_env_vars/{env}/.env.{source}.keys
+  source: '{env}/.env.{source}.keys'
   target: targets/{env}/.env.{target}.keys
 
 targets:

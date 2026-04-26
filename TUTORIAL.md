@@ -46,9 +46,9 @@ Create the folder layout:
 
 ```bash
 mkdir -p source_env_vars/dev source_env_vars/staging source_env_vars/prod
-mkdir -p tutorial_secrets/source_env_vars/dev
-mkdir -p tutorial_secrets/source_env_vars/staging
-mkdir -p tutorial_secrets/source_env_vars/prod
+mkdir -p tutorial_secrets/dev
+mkdir -p tutorial_secrets/staging
+mkdir -p tutorial_secrets/prod
 mkdir -p tutorial_secrets/targets/dev tutorial_secrets/targets/staging tutorial_secrets/targets/prod
 ```
 
@@ -117,22 +117,22 @@ For each source file, run `npx dotenvx encrypt`, move the generated `.env.keys` 
 
 ```bash
 npx dotenvx encrypt -f source_env_vars/dev/.env.stripe
-mv .env.keys tutorial_secrets/source_env_vars/dev/.env.stripe.keys
+mv .env.keys tutorial_secrets/dev/.env.stripe.keys
 
 npx dotenvx encrypt -f source_env_vars/dev/.env.cloudflare
-mv .env.keys tutorial_secrets/source_env_vars/dev/.env.cloudflare.keys
+mv .env.keys tutorial_secrets/dev/.env.cloudflare.keys
 
 npx dotenvx encrypt -f source_env_vars/staging/.env.stripe
-mv .env.keys tutorial_secrets/source_env_vars/staging/.env.stripe.keys
+mv .env.keys tutorial_secrets/staging/.env.stripe.keys
 
 npx dotenvx encrypt -f source_env_vars/staging/.env.cloudflare
-mv .env.keys tutorial_secrets/source_env_vars/staging/.env.cloudflare.keys
+mv .env.keys tutorial_secrets/staging/.env.cloudflare.keys
 
 npx dotenvx encrypt -f source_env_vars/prod/.env.stripe
-mv .env.keys tutorial_secrets/source_env_vars/prod/.env.stripe.keys
+mv .env.keys tutorial_secrets/prod/.env.stripe.keys
 
 npx dotenvx encrypt -f source_env_vars/prod/.env.cloudflare
-mv .env.keys tutorial_secrets/source_env_vars/prod/.env.cloudflare.keys
+mv .env.keys tutorial_secrets/prod/.env.cloudflare.keys
 ```
 
 Inspect one encrypted source file:
@@ -152,7 +152,7 @@ STRIPE_PUBLISHABLE_KEY="encrypted:..."
 Inspect one key file:
 
 ```bash
-cat tutorial_secrets/source_env_vars/prod/.env.stripe.keys
+cat tutorial_secrets/prod/.env.stripe.keys
 ```
 
 You should see a dotenvx private key entry. This file is required to decrypt the encrypted source file and should not be committed in a real project.
@@ -174,7 +174,7 @@ environments:
   - prod
 
 keyFilePatterns:
-  source: source_env_vars/{env}/.env.{source}.keys
+  source: '{env}/.env.{source}.keys'
   target: targets/{env}/.env.{target}.keys
 
 targets:

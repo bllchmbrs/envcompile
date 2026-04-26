@@ -122,6 +122,27 @@ export async function encryptSources(config, options = {}) {
       filePath: sourceFile,
       cwd: path.dirname(sourceFile),
     });
+
+    // dotenvx writes keys to .env.keys in the source directory.
+    // Move them to the location envcompile expects (keysDir pattern).
+    const dotenvxKeysFile = path.join(path.dirname(sourceFile), '.env.keys');
+    const expectedKeyFile = resolveSourceKeyFile(config, env, source);
+    try {
+      const keysContent = await fs.readFile(dotenvxKeysFile, 'utf8');
+      await fs.mkdir(path.dirname(expectedKeyFile), { recursive: true });
+      // Append if the key file already exists (multiple sources may share a dir)
+      try {
+        const existing = await fs.readFile(expectedKeyFile, 'utf8');
+        await fs.writeFile(expectedKeyFile, existing + '\n' + keysContent, { mode: 0o600 });
+      } catch {
+        await fs.writeFile(expectedKeyFile, keysContent, { mode: 0o600 });
+      }
+      await fs.unlink(dotenvxKeysFile);
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+      // If dotenvx didn't create .env.keys, nothing to move
+    }
+
     results.push({ env, source, skipped: false });
   }
 

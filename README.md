@@ -23,8 +23,8 @@ Private keys live outside the repo:
 
 ```text
 ~/secrets/project/
-  source_env_vars/dev/.env.stripe.keys
-  source_env_vars/dev/.env.cloudflare.keys
+  dev/.env.stripe.keys
+  dev/.env.cloudflare.keys
   targets/prod/.env.api.keys
 ```
 
@@ -53,7 +53,7 @@ environments:
   - prod
 
 keyFilePatterns:
-  source: source_env_vars/{env}/.env.{source}.keys
+  source: '{env}/.env.{source}.keys'
   target: targets/{env}/.env.{target}.keys
 
 targets:
@@ -96,7 +96,7 @@ Source files resolve to:
 Source key files resolve to:
 
 ```text
-{keysDir}/source_env_vars/{env}/.env.{source}.keys
+{keysDir}/{env}/.env.{source}.keys
 ```
 
 Target key files resolve to:
