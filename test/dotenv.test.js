@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { test, expect } from 'bun:test';
 import { parseDotenv, parsePrivateKeys, stringifyDotenv, privateKeyExportName } from '../src/dotenv.js';
 
 test('parseDotenv handles comments, quotes, and export prefixes', () => {
@@ -12,7 +11,7 @@ INLINE=value # comment
 MULTILINE="a\\nb"
 `);
 
-  assert.deepEqual(parsed, {
+  expect(parsed).toEqual({
     SIMPLE: 'hello',
     QUOTED: 'hello world',
     SINGLE: 'literal value',
@@ -22,26 +21,25 @@ MULTILINE="a\\nb"
 });
 
 test('parsePrivateKeys returns dotenvx private key entries only', () => {
-  assert.deepEqual(parsePrivateKeys(`
+  expect(parsePrivateKeys(`
 DOTENV_PUBLIC_KEY="public"
 DOTENV_PRIVATE_KEY_API="private"
 OTHER=value
-`), {
+`)).toEqual({
     DOTENV_PRIVATE_KEY_API: 'private',
   });
 });
 
 test('stringifyDotenv quotes values and skips public keys', () => {
-  assert.equal(
+  expect(
     stringifyDotenv([
       ['DOTENV_PUBLIC_KEY', 'public'],
       ['HELLO', 'hello world'],
       ['MULTI', 'a\nb'],
     ]),
-    'HELLO="hello world"\nMULTI="a\\nb"\n',
-  );
+  ).toBe('HELLO="hello world"\nMULTI="a\\nb"\n');
 });
 
 test('privateKeyExportName normalizes target and environment labels', () => {
-  assert.equal(privateKeyExportName('api-worker', 'prod'), 'DOTENV_PRIVATE_KEY_API_WORKER_PROD');
+  expect(privateKeyExportName('api-worker', 'prod')).toBe('DOTENV_PRIVATE_KEY_API_WORKER_PROD');
 });

@@ -15,9 +15,10 @@
     "envcompile.config.example.yaml"
   ],
   "scripts": {
-    "test": "node --test",
-    "check": "node --check bin/envcompile.js && node --check src/*.js"
-  },
+    "test": "bun test",
+    "check": "bun bin/envcompile.js --help",
+    "link": "bun link"
+},
   "keywords": [
     "dotenvx",
     "dotenv",
@@ -28,7 +29,7 @@
   "author": "",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "bun": ">=1.0"
   },
   "dependencies": {
     "@dotenvx/dotenvx": "^1.63.0",

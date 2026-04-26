@@ -87,6 +87,12 @@ export function normalizeConfig(raw, configDir) {
     if (!target.output) {
       throw configError(`Target "${name}" requires output.`);
     }
+    if (typeof target.output !== 'string' && (typeof target.output !== 'object' || Array.isArray(target.output))) {
+      throw configError(`Target "${name}" output must be a string or an object mapping environments to paths.`);
+    }
+    if (target.keyFile && typeof target.keyFile !== 'string' && (typeof target.keyFile !== 'object' || Array.isArray(target.keyFile))) {
+      throw configError(`Target "${name}" keyFile must be a string or an object mapping environments to paths.`);
+    }
     const duplicatePolicy = target.duplicatePolicy || 'error';
     if (!['error', 'first-wins', 'last-wins'].includes(duplicatePolicy)) {
       throw configError(`Target "${name}" has invalid duplicatePolicy "${duplicatePolicy}".`);
@@ -96,11 +102,24 @@ export function normalizeConfig(raw, configDir) {
       throw configError(`Target "${name}" has invalid ordering "${ordering}".`);
     }
 
+    const normalizedOutput = typeof target.output === 'string'
+      ? String(target.output)
+      : Object.fromEntries(Object.entries(target.output).map(([k, v]) => [String(k), String(v)]));
+
+    let normalizedKeyFile;
+    if (!target.keyFile) {
+      normalizedKeyFile = keyFilePatterns.target;
+    } else if (typeof target.keyFile === 'string') {
+      normalizedKeyFile = String(target.keyFile);
+    } else {
+      normalizedKeyFile = Object.fromEntries(Object.entries(target.keyFile).map(([k, v]) => [String(k), String(v)]));
+    }
+
     targets[name] = {
       description: target.description || '',
       sources: target.sources.map(String),
-      output: String(target.output),
-      keyFile: target.keyFile ? String(target.keyFile) : keyFilePatterns.target,
+      output: normalizedOutput,
+      keyFile: normalizedKeyFile,
       required: Array.isArray(target.required) ? target.required.map(String) : [],
       duplicatePolicy,
       ordering,

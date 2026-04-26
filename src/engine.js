@@ -31,14 +31,23 @@ export function resolveSourceKeyFile(config, env, source) {
 
 export function resolveTargetOutput(config, targetName, env, override) {
   const target = getTarget(config, targetName);
-  const rendered = renderTemplate(override || target.output, { env, target: targetName });
+  const raw = override || (typeof target.output === 'object' ? resolveEnvMap(target.output, env, targetName, 'output') : target.output);
+  const rendered = renderTemplate(raw, { env, target: targetName });
   return resolveFrom(config.configDir, rendered);
 }
 
 export function resolveTargetKeyFile(config, targetName, env) {
   const target = getTarget(config, targetName);
-  const rendered = renderTemplate(target.keyFile, { env, target: targetName });
+  const raw = typeof target.keyFile === 'object' ? resolveEnvMap(target.keyFile, env, targetName, 'keyFile') : target.keyFile;
+  const rendered = renderTemplate(raw, { env, target: targetName });
   return resolveFrom(config.keysDir, rendered);
+}
+
+function resolveEnvMap(map, env, targetName, field) {
+  if (!(env in map)) {
+    throw new EnvcompileError(`Target "${targetName}" has no ${field} entry for environment "${env}".`, 1);
+  }
+  return map[env];
 }
 
 export async function loadComposedTarget(config, targetName, env, options = {}) {
