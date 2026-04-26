@@ -33,6 +33,8 @@ Usage:
   envcompile encrypt [source] [--env <env>] [--config <path>] [--dotenvx <bin>]
   envcompile decrypt [source] [--env <env>] [--config <path>] [--dotenvx <bin>]
   envcompile inspect <target> --env <env> [--show-values --yes] [--dotenvx <bin>]
+  envcompile gitignore
+  envcompile pre-commit [--force]
 
 Global options:
   --config <path>       Config file path. Defaults to envcompile.config.{yaml,yml,json}.
@@ -84,6 +86,12 @@ export async function main(argv, io = defaultIo()) {
       break;
     case 'inspect':
       await inspectCommand(positional, options, io);
+      break;
+    case 'gitignore':
+      await gitignoreCommand(io);
+      break;
+    case 'pre-commit':
+      await preCommitCommand(options, io);
       break;
     default:
       throw configError(`Unknown command "${command}". Run envcompile --help.`);
@@ -401,6 +409,96 @@ function formatDuplicateHierarchy(item, duplicatePolicy) {
     return '; compilation fails unless duplicatePolicy allows duplicates';
   }
   return '';
+}
+
+const PRE_COMMIT_HOOK = `#!/usr/bin/env bash
+# envcompile pre-commit hook: block unencrypted .env files from being committed
+# Installed by: envcompile pre-commit
+
+ENCRYPTED_PATTERN='^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*"?encrypted:'
+
+failed=0
+for file in $(git diff --cached --name-only --diff-filter=ACM); do
+  case "$file" in
+    *.env.keys|*.env.keys.*) continue ;;
+    *.env|*.env.*|.env)
+      content=$(git show ":$file")
+      if [ -n "$content" ] && ! echo "$content" | grep -qE "$ENCRYPTED_PATTERN"; then
+        echo "ERROR: Unencrypted env file staged for commit: $file"
+        echo "       Run 'envcompile encrypt' before committing."
+        failed=1
+      fi
+      ;;
+  esac
+done
+
+if [ "$failed" -eq 1 ]; then
+  exit 1
+fi
+`;
+
+const HOOK_MARKER = '# Installed by: envcompile pre-commit';
+
+async function preCommitCommand(options, io) {
+  // Find the .git directory
+  const gitDir = path.resolve(process.cwd(), '.git');
+  try {
+    await fs.access(gitDir);
+  } catch {
+    throw new EnvcompileError('Not a git repository. Run this from a git repo root.', 1);
+  }
+
+  const hooksDir = path.join(gitDir, 'hooks');
+  await fs.mkdir(hooksDir, { recursive: true });
+  const hookPath = path.join(hooksDir, 'pre-commit');
+
+  try {
+    const existing = await fs.readFile(hookPath, 'utf8');
+    if (existing.includes(HOOK_MARKER)) {
+      io.out('Pre-commit hook already installed.');
+      return;
+    }
+    if (!options.force) {
+      throw new EnvcompileError(
+        `A pre-commit hook already exists at ${hookPath}. Use --force to overwrite.`,
+        1,
+      );
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+
+  await fs.writeFile(hookPath, PRE_COMMIT_HOOK, { mode: 0o755 });
+  io.out(`Installed pre-commit hook at ${toDisplayPath(hookPath)}`);
+}
+
+const GITIGNORE_LINES = [
+  '# envcompile: allow .env files but ignore private keys',
+  '*.env.keys',
+  '.env.keys',
+];
+
+async function gitignoreCommand(io) {
+  const gitignorePath = path.resolve(process.cwd(), '.gitignore');
+  let existing = '';
+  try {
+    existing = await fs.readFile(gitignorePath, 'utf8');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+
+  const lines = existing.split('\n');
+  const toAdd = GITIGNORE_LINES.filter((line) => !lines.includes(line));
+
+  if (toAdd.length === 0) {
+    io.out('.gitignore already has envcompile entries.');
+    return;
+  }
+
+  const suffix = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
+  const prefix = existing.length > 0 ? '\n' : '';
+  await fs.writeFile(gitignorePath, existing + suffix + prefix + toAdd.join('\n') + '\n');
+  io.out(`Updated ${toDisplayPath(gitignorePath)}`);
 }
 
 function defaultIo() {

@@ -25,7 +25,6 @@ Private keys live outside the repo:
 ~/secrets/project/
   dev/.env.stripe.keys
   dev/.env.cloudflare.keys
-  targets/prod/.env.api.keys
 ```
 
 ## Install
@@ -54,12 +53,12 @@ environments:
 
 keyFilePatterns:
   source: '{env}/.env.{source}.keys'
-  target: targets/{env}/.env.{target}.keys
+  target: compiled_env/{env}/.env.{target}.keys
 
 targets:
   api:
     output: compiled_env/{env}/.env.api
-    keyFile: targets/{env}/.env.api.keys
+    keyFile: compiled_env/{env}/.env.api.keys
     sources:
       - stripe
       - cloudflare
@@ -80,8 +79,8 @@ targets:
       staging: compiled_env/staging/.env.api
       prod: compiled_env/prod/.env.api
     keyFile:
-      dev: targets/dev/.env.api.keys
-      prod: targets/prod/.env.api.keys
+      dev: compiled_env/dev/.env.api.keys
+      prod: compiled_env/prod/.env.api.keys
     sources:
       - stripe
       - cloudflare
@@ -99,10 +98,10 @@ Source key files resolve to:
 {keysDir}/{env}/.env.{source}.keys
 ```
 
-Target key files resolve to:
+Target key files resolve relative to the config directory (next to the output file):
 
 ```text
-{keysDir}/targets/{env}/.env.{target}.keys
+compiled_env/{env}/.env.{target}.keys
 ```
 
 ## Commands
@@ -215,6 +214,24 @@ Showing values is intentionally noisy:
 
 ```bash
 envcompile inspect api --env prod --show-values --yes
+```
+
+Install a pre-commit hook to block unencrypted `.env` files from being committed:
+
+```bash
+envcompile pre-commit
+```
+
+If a pre-commit hook already exists, use `--force` to overwrite it:
+
+```bash
+envcompile pre-commit --force
+```
+
+Update `.gitignore` to ignore `.env.keys` files:
+
+```bash
+envcompile gitignore
 ```
 
 ## Duplicate policy

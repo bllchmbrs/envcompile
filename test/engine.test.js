@@ -121,14 +121,14 @@ process.exit(9);
       environments: ['dev'],
       keyFilePatterns: {
         source: '{env}/.env.{source}.keys',
-        target: 'targets/{env}/.env.{target}.keys',
+        target: 'compiled_env/{env}/.env.{target}.keys',
       },
       targets: {
         api: {
           description: '',
           sources: ['stripe', 'cloudflare'],
           output: 'compiled_env/{env}/.env.api',
-          keyFile: 'targets/{env}/.env.api.keys',
+          keyFile: 'compiled_env/{env}/.env.api.keys',
           required: ['STRIPE_SECRET_KEY', 'CLOUDFLARE_API_TOKEN'],
           duplicatePolicy: overrides.duplicatePolicy || 'error',
           ordering: 'config',

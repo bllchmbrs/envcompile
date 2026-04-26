@@ -49,7 +49,6 @@ mkdir -p source_env_vars/dev source_env_vars/staging source_env_vars/prod
 mkdir -p tutorial_secrets/dev
 mkdir -p tutorial_secrets/staging
 mkdir -p tutorial_secrets/prod
-mkdir -p tutorial_secrets/targets/dev tutorial_secrets/targets/staging tutorial_secrets/targets/prod
 ```
 
 ## Create Plaintext Source Files
@@ -175,13 +174,13 @@ environments:
 
 keyFilePatterns:
   source: '{env}/.env.{source}.keys'
-  target: targets/{env}/.env.{target}.keys
+  target: compiled_env/{env}/.env.{target}.keys
 
 targets:
   api:
     description: API deployment bundle
     output: compiled_env/{env}/.env.api
-    keyFile: targets/{env}/.env.api.keys
+    keyFile: compiled_env/{env}/.env.api.keys
     sources:
       - stripe
       - cloudflare
@@ -196,7 +195,7 @@ targets:
   web:
     description: Web deployment bundle
     output: compiled_env/{env}/.env.web
-    keyFile: targets/{env}/.env.web.keys
+    keyFile: compiled_env/{env}/.env.web.keys
     sources:
       - stripe
     required:
@@ -285,7 +284,7 @@ Expected output:
 ```text
 Dry run ok: api/prod
 Would write .../compiled_env/prod/.env.api
-Would write .../tutorial_secrets/targets/prod/.env.api.keys
+Would write .../compiled_env/prod/.env.api.keys
 ```
 
 Now compile the production API target:
@@ -299,7 +298,7 @@ Expected output shape:
 ```text
 Compiled api/prod
 Env:  .../compiled_env/prod/.env.api
-Keys: .../tutorial_secrets/targets/prod/.env.api.keys
+Keys: .../compiled_env/prod/.env.api.keys
 DOTENV_PRIVATE_KEY_API="..."
 ```
 
@@ -314,7 +313,7 @@ You should see encrypted values for both Stripe and Cloudflare keys.
 The compiled key file is separate:
 
 ```bash
-cat tutorial_secrets/targets/prod/.env.api.keys
+cat compiled_env/prod/.env.api.keys
 ```
 
 In a real deployment, this target key is what you would place in your deployment secret store.
@@ -325,7 +324,7 @@ Load the generated private key and decrypt the compiled env file:
 
 ```bash
 set -a
-. tutorial_secrets/targets/prod/.env.api.keys
+. compiled_env/prod/.env.api.keys
 set +a
 
 npx dotenvx decrypt -f compiled_env/prod/.env.api --stdout
@@ -362,7 +361,7 @@ Run the program through dotenvx with the compiled encrypted env file and its gen
 ```bash
 npm exec -- dotenvx run \
   -f compiled_env/prod/.env.api \
-  -fk tutorial_secrets/targets/prod/.env.api.keys \
+  -fk compiled_env/prod/.env.api.keys \
   -- python3 run_my_thing.py
 ```
 
@@ -376,7 +375,7 @@ cloudflare zone: prod-zone-789
 That is the end-to-end deployment shape:
 
 1. Commit or ship `compiled_env/prod/.env.api`.
-2. Store `DOTENV_PRIVATE_KEY_API` from `tutorial_secrets/targets/prod/.env.api.keys` in the runtime secret store.
+2. Store `DOTENV_PRIVATE_KEY_API` from `compiled_env/prod/.env.api.keys` in the runtime secret store.
 3. Start your real process with `dotenvx run -f compiled_env/prod/.env.api -- your_command`.
 
 When the runtime already exports `DOTENV_PRIVATE_KEY_API`, you can omit `-fk`.
@@ -426,7 +425,7 @@ Decrypt the compiled target again:
 
 ```bash
 set -a
-. tutorial_secrets/targets/prod/.env.api.keys
+. compiled_env/prod/.env.api.keys
 set +a
 
 npx dotenvx decrypt -f compiled_env/prod/.env.api --stdout

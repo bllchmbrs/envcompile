@@ -215,7 +215,7 @@ export function resolveTargetKeyFile(config, targetName, env) {
   const target = getTarget(config, targetName);
   const raw = typeof target.keyFile === 'object' ? resolveEnvMap(target.keyFile, env, targetName, 'keyFile') : target.keyFile;
   const rendered = renderTemplate(raw, { env, target: targetName });
-  return resolveFrom(config.keysDir, rendered);
+  return resolveFrom(config.configDir, rendered);
 }
 
 function resolveEnvMap(map, env, targetName, field) {
