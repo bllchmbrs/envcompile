@@ -228,7 +228,7 @@ If a pre-commit hook already exists, use `--force` to overwrite it:
 envcompile pre-commit --force
 ```
 
-Update `.gitignore` to ignore `.env.keys` files:
+Update `.gitignore` in source directories to ignore `.env.keys` files:
 
 ```bash
 envcompile gitignore
