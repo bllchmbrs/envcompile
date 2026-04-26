@@ -17,6 +17,7 @@ import {
 import { EnvcompileError, configError } from './errors.js';
 import { parsePrivateKeys } from './dotenv.js';
 import { toDisplayPath } from './paths.js';
+import { spawnFile } from './process.js';
 
 const HELP = `envcompile
 
@@ -440,15 +441,11 @@ fi
 const HOOK_MARKER = '# Installed by: envcompile pre-commit';
 
 async function preCommitCommand(options, io) {
-  // Find the .git directory
-  const gitDir = path.resolve(process.cwd(), '.git');
-  try {
-    await fs.access(gitDir);
-  } catch {
+  const { code, stdout } = await spawnFile('git', ['rev-parse', '--git-common-dir']);
+  if (code !== 0) {
     throw new EnvcompileError('Not a git repository. Run this from a git repo root.', 1);
   }
-
-  const hooksDir = path.join(gitDir, 'hooks');
+  const hooksDir = path.join(path.resolve(process.cwd(), stdout.trim()), 'hooks');
   await fs.mkdir(hooksDir, { recursive: true });
   const hookPath = path.join(hooksDir, 'pre-commit');
 

@@ -30,7 +30,8 @@ test('parseArgs supports lint strict flag', () => {
 
 test('pre-commit command installs git hook', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-cli-'));
-  await fs.mkdir(path.join(tmpDir, '.git', 'hooks'), { recursive: true });
+  const { execSync } = await import('node:child_process');
+  execSync('git init', { cwd: tmpDir, stdio: 'pipe' });
   const origCwd = process.cwd();
   process.chdir(tmpDir);
   try {
