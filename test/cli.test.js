@@ -85,6 +85,11 @@ test('pre-commit hook detects unencrypted env files', async () => {
     await fs.writeFile(path.join(tmpDir, '.env.api'), 'SECRET_KEY="encrypted:abc123"\n');
     execSync('git add .env.api', { cwd: tmpDir, stdio: 'pipe' });
     execSync('git commit -m "test encrypted"', { cwd: tmpDir, stdio: 'pipe' });
+
+    // Example files should be allowed through unencrypted
+    await fs.writeFile(path.join(tmpDir, '.env.example'), 'SECRET_KEY=changeme\n');
+    execSync('git add .env.example', { cwd: tmpDir, stdio: 'pipe' });
+    execSync('git commit -m "test example"', { cwd: tmpDir, stdio: 'pipe' });
   } finally {
     process.chdir(origCwd);
     await fs.rm(tmpDir, { recursive: true, force: true });

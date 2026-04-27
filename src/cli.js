@@ -423,6 +423,7 @@ failed=0
 for file in $(git diff --cached --name-only --diff-filter=ACM); do
   case "$file" in
     *.env.keys|*.env.keys.*) continue ;;
+    *.env.example|*.env.example.*|.env.example) continue ;;
     *.env|*.env.*|.env)
       content=$(git show ":$file")
       if [ -n "$content" ] && ! echo "$content" | grep -qE "$ENCRYPTED_PATTERN"; then
