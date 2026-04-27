@@ -472,16 +472,12 @@ async function preCommitCommand(options, io) {
 
 const TARGET_GITIGNORE_LINES = [
   '# envcompile: ignore private keys',
-  '*.env.keys',
-  '.env.keys',
+  '*.keys',
 ];
 
 function buildSourceGitignoreLines(sources) {
   const lines = ['# envcompile: ignore private keys'];
-  lines.push('.env.keys');
-  for (const source of [...sources].sort()) {
-    lines.push(`.env.${source}.keys`);
-  }
+  lines.push('*.keys');
   return lines;
 }
 
@@ -536,18 +532,25 @@ async function gitignoreCommand(options, io) {
     }
   }
 
-  // Update .gitignore in target output directories with *.env.keys
-  const targetDirs = new Set();
+  // Update .gitignore in target output directories with *.keys and compiled output files
+  const targetOutputsByDir = new Map();
   for (const [targetName] of Object.entries(config.targets)) {
     for (const env of config.environments) {
       const outputFile = resolveTargetOutput(config, targetName, env);
-      targetDirs.add(path.dirname(outputFile));
+      const dir = path.dirname(outputFile);
+      if (!targetOutputsByDir.has(dir)) targetOutputsByDir.set(dir, []);
+      targetOutputsByDir.get(dir).push(path.basename(outputFile));
     }
   }
 
-  for (const dir of targetDirs) {
+  for (const [dir, outputFiles] of targetOutputsByDir) {
+    const lines = [
+      ...TARGET_GITIGNORE_LINES,
+      '# envcompile: ignore compiled output',
+      ...([...new Set(outputFiles)].sort()),
+    ];
     await fs.mkdir(dir, { recursive: true });
-    if (await updateGitignore(dir, TARGET_GITIGNORE_LINES)) {
+    if (await updateGitignore(dir, lines)) {
       io.out(`Updated ${toDisplayPath(path.join(dir, '.gitignore'))}`);
       updated++;
     }

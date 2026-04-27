@@ -109,18 +109,17 @@ test('gitignore command adds key ignore entries to source directories', async ()
     const output = [];
     await main(['gitignore'], { out: (msg) => output.push(msg), err: () => {} });
 
-    // Should update .gitignore in sourceDir and env subdirectories with specific key files
+    // Should update .gitignore in sourceDir and env subdirectories with *.keys glob
     const content = await fs.readFile(path.join(sourceDir, '.gitignore'), 'utf8');
-    assert.ok(content.includes('.env.keys'));
-    assert.ok(content.includes('.env.app.keys'));
-    assert.ok(!content.includes('*.env.keys'), 'should not use wildcard pattern');
+    assert.ok(content.includes('*.keys'));
 
     const devContent = await fs.readFile(path.join(sourceDir, 'dev', '.gitignore'), 'utf8');
-    assert.ok(devContent.includes('.env.app.keys'));
+    assert.ok(devContent.includes('*.keys'));
 
-    // Should update .gitignore in target output directories with wildcard pattern
+    // Should update .gitignore in target output directories with *.keys and compiled output files
     const targetContent = await fs.readFile(path.join(tmpDir, 'compiled', 'dev', '.gitignore'), 'utf8');
-    assert.ok(targetContent.includes('*.env.keys'));
+    assert.ok(targetContent.includes('*.keys'));
+    assert.ok(targetContent.includes('.env.api'), 'should ignore compiled output file');
 
     // Should NOT create .gitignore in project root
     await assert.rejects(fs.readFile(path.join(tmpDir, '.gitignore'), 'utf8'), { code: 'ENOENT' });
