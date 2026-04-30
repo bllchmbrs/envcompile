@@ -55,8 +55,9 @@ export function normalizeConfig(raw, configDir) {
   if (raw.version !== 1) {
     throw configError('Config version must be 1.');
   }
-  if (!raw.sourceDir) {
-    throw configError('Config requires sourceDir.');
+  const rawPrivateDir = raw.privateDir || raw.sourceDir;
+  if (!rawPrivateDir) {
+    throw configError('Config requires privateDir (or sourceDir).');
   }
   if (!raw.keysDir) {
     throw configError('Config requires keysDir.');
@@ -68,7 +69,8 @@ export function normalizeConfig(raw, configDir) {
     throw configError('Config requires targets.');
   }
 
-  const sourceDir = resolveFrom(configDir, raw.sourceDir);
+  const sourceDir = resolveFrom(configDir, rawPrivateDir);
+  const publicDir = raw.publicDir ? resolveFrom(configDir, raw.publicDir) : null;
   const keysDir = resolveFrom(configDir, raw.keysDir);
   const keyFilePatterns = {
     source: '{env}/.env.{source}.keys',
@@ -83,6 +85,12 @@ export function normalizeConfig(raw, configDir) {
     }
     if (!Array.isArray(target.sources) || target.sources.length === 0) {
       throw configError(`Target "${name}" requires at least one source.`);
+    }
+    if (target.publicSources != null && !Array.isArray(target.publicSources)) {
+      throw configError(`Target "${name}" publicSources must be an array.`);
+    }
+    if (target.publicSources && target.publicSources.length > 0 && !publicDir) {
+      throw configError(`Target "${name}" has publicSources but no publicDir is configured.`);
     }
     if (!target.output) {
       throw configError(`Target "${name}" requires output.`);
@@ -118,6 +126,7 @@ export function normalizeConfig(raw, configDir) {
     targets[name] = {
       description: target.description || '',
       sources: target.sources.map(String),
+      publicSources: Array.isArray(target.publicSources) ? target.publicSources.map(String) : [],
       output: normalizedOutput,
       keyFile: normalizedKeyFile,
       required: Array.isArray(target.required) ? target.required.map(String) : [],
@@ -130,6 +139,7 @@ export function normalizeConfig(raw, configDir) {
     version: 1,
     configDir,
     sourceDir,
+    publicDir,
     keysDir,
     environments: raw.environments.map(String),
     keyFilePatterns,

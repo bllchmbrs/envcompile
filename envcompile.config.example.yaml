@@ -1,6 +1,7 @@
 version: 1
 
-sourceDir: source_env_vars
+privateDir: source_env_vars
+publicDir: public_env_vars
 keysDir: ~/secrets/project
 
 environments:
@@ -20,6 +21,8 @@ targets:
     sources:
       - stripe
       - cloudflare
+    publicSources:
+      - defaults
     required:
       - STRIPE_SECRET_KEY
       - CLOUDFLARE_API_TOKEN

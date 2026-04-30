@@ -11,6 +11,7 @@ import {
   lintTargets,
   loadComposedTarget,
   resolveSourceFile,
+  resolvePublicSourceFile,
   resolveSourceKeyFile,
   resolveTargetOutput,
   validateConfig,
@@ -146,6 +147,9 @@ async function initCommand(options, io) {
   await fs.mkdir(path.resolve(process.cwd(), 'source_env_vars/dev'), { recursive: true });
   await fs.mkdir(path.resolve(process.cwd(), 'source_env_vars/staging'), { recursive: true });
   await fs.mkdir(path.resolve(process.cwd(), 'source_env_vars/prod'), { recursive: true });
+  await fs.mkdir(path.resolve(process.cwd(), 'public_env_vars/dev'), { recursive: true });
+  await fs.mkdir(path.resolve(process.cwd(), 'public_env_vars/staging'), { recursive: true });
+  await fs.mkdir(path.resolve(process.cwd(), 'public_env_vars/prod'), { recursive: true });
   io.out(`Created ${toDisplayPath(destination)}`);
 }
 
@@ -157,11 +161,20 @@ async function listCommand(options, io) {
 
 async function sourcesCommand(options, io) {
   const { config } = await loadConfig(process.cwd(), options.config);
-  const sources = new Set();
+  const privateSources = new Set();
+  const publicSources = new Set();
   for (const target of Object.values(config.targets)) {
-    for (const source of target.sources) sources.add(source);
+    for (const source of target.sources) privateSources.add(source);
+    for (const source of target.publicSources) publicSources.add(source);
   }
-  io.out([...sources].sort().join('\n'));
+  if (privateSources.size > 0) {
+    io.out('Private:');
+    io.out([...privateSources].sort().map((s) => `  ${s}`).join('\n'));
+  }
+  if (publicSources.size > 0) {
+    io.out('Public:');
+    io.out([...publicSources].sort().map((s) => `  ${s}`).join('\n'));
+  }
 }
 
 async function targetsCommand(options, io) {
@@ -345,6 +358,13 @@ async function inspectCommand(positional, options, io) {
   for (const source of target.sources) {
     io.out(`Source: ${toDisplayPath(resolveSourceFile(config, options.env, source))}`);
     io.out(`Keys:   ${toDisplayPath(resolveSourceKeyFile(config, options.env, source))}`);
+  }
+
+  if (target.publicSources.length > 0) {
+    io.out(`Public sources: ${target.publicSources.join(', ')}`);
+    for (const source of target.publicSources) {
+      io.out(`Source: ${toDisplayPath(resolvePublicSourceFile(config, options.env, source))}`);
+    }
   }
 
   const composed = await loadComposedTarget(config, targetName, options.env, {

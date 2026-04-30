@@ -66,6 +66,49 @@ test('lintTargets strict mode fails on duplicate keys', async () => {
   assert.equal(result.diagnostics[0].type, 'duplicate');
 });
 
+test('loadComposedTarget merges public and private sources', async () => {
+  const fixture = await makeFixture();
+
+  // Add public source
+  const publicDir = path.join(fixture.config.configDir, 'public_env_vars');
+  await fs.mkdir(path.join(publicDir, 'dev'), { recursive: true });
+  await fs.writeFile(path.join(publicDir, 'dev/.env.defaults'), 'APP_NAME=myapp\nLOG_LEVEL=info\n');
+
+  fixture.config.publicDir = publicDir;
+  fixture.config.targets.api.publicSources = ['defaults'];
+
+  const composed = await loadComposedTarget(fixture.config, 'api', 'dev', {
+    dotenvxBin: fixture.dotenvxBin,
+  });
+
+  assert.equal(composed.ok, true);
+  assert.deepEqual(composed.entries, [
+    ['STRIPE_SECRET_KEY', 'sk_dev'],
+    ['CLOUDFLARE_API_TOKEN', 'cf_dev'],
+    ['APP_NAME', 'myapp'],
+    ['LOG_LEVEL', 'info'],
+  ]);
+});
+
+test('loadComposedTarget detects duplicates between public and private sources', async () => {
+  const fixture = await makeFixture();
+
+  const publicDir = path.join(fixture.config.configDir, 'public_env_vars');
+  await fs.mkdir(path.join(publicDir, 'dev'), { recursive: true });
+  await fs.writeFile(path.join(publicDir, 'dev/.env.defaults'), 'STRIPE_SECRET_KEY=public_value\n');
+
+  fixture.config.publicDir = publicDir;
+  fixture.config.targets.api.publicSources = ['defaults'];
+
+  const composed = await loadComposedTarget(fixture.config, 'api', 'dev', {
+    dotenvxBin: fixture.dotenvxBin,
+  });
+
+  assert.equal(composed.ok, false);
+  assert.equal(composed.diagnostics[0].type, 'duplicate');
+  assert.equal(composed.diagnostics[0].key, 'STRIPE_SECRET_KEY');
+});
+
 test('compileTarget writes encrypted output and generated key file', async () => {
   const fixture = await makeFixture();
   const result = await compileTarget(fixture.config, 'api', 'dev', {
@@ -117,6 +160,7 @@ process.exit(9);
       version: 1,
       configDir: root,
       sourceDir,
+      publicDir: null,
       keysDir,
       environments: ['dev'],
       keyFilePatterns: {
@@ -127,6 +171,7 @@ process.exit(9);
         api: {
           description: '',
           sources: ['stripe', 'cloudflare'],
+          publicSources: [],
           output: 'compiled_env/{env}/.env.api',
           keyFile: 'compiled_env/{env}/.env.api.keys',
           required: ['STRIPE_SECRET_KEY', 'CLOUDFLARE_API_TOKEN'],

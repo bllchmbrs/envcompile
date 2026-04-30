@@ -23,6 +23,15 @@ export async function validateConfig(config) {
     results.push({ label: 'keysDir', ok: false, errors: [`Directory not found: ${config.keysDir}`] });
   }
 
+  // Check that publicDir exists (if configured)
+  if (config.publicDir) {
+    try {
+      await fs.access(config.publicDir);
+    } catch {
+      results.push({ label: 'publicDir', ok: false, errors: [`Directory not found: ${config.publicDir}`] });
+    }
+  }
+
   // For each target × env, check source files and key files exist
   for (const [targetName, target] of Object.entries(config.targets)) {
     for (const env of config.environments) {
@@ -41,6 +50,15 @@ export async function validateConfig(config) {
           await fs.access(keyFile);
         } catch {
           errors.push(`Missing source key file: ${keyFile}`);
+        }
+      }
+
+      for (const source of target.publicSources) {
+        const sourceFile = resolvePublicSourceFile(config, env, source);
+        try {
+          await fs.access(sourceFile);
+        } catch {
+          errors.push(`Missing public source file: ${sourceFile}`);
         }
       }
 
@@ -199,6 +217,10 @@ export function resolveSourceFile(config, env, source) {
   return path.join(config.sourceDir, env, `.env.${source}`);
 }
 
+export function resolvePublicSourceFile(config, env, source) {
+  return path.join(config.publicDir, env, `.env.${source}`);
+}
+
 export function resolveSourceKeyFile(config, env, source) {
   const rendered = renderTemplate(config.keyFilePatterns.source, { env, source });
   return resolveFrom(config.keysDir, rendered);
@@ -250,6 +272,38 @@ export async function loadComposedTarget(config, targetName, env, options = {}) 
       privateKeys,
     });
     const parsed = parseDotenv(decrypted);
+
+    for (const [key, value] of Object.entries(parsed)) {
+      if (isPublicKeyName(key)) continue;
+      if (seen.has(key)) {
+        diagnostics.push({
+          type: 'duplicate',
+          key,
+          firstSource: seen.get(key).source,
+          secondSource: source,
+        });
+        if (target.duplicatePolicy === 'error') continue;
+        if (target.duplicatePolicy === 'last-wins') {
+          const original = seen.get(key);
+          entries[original.index] = null;
+          seen.set(key, { source, index: entries.length });
+          entries.push([key, value, source]);
+        }
+        continue;
+      }
+
+      seen.set(key, { source, index: entries.length });
+      entries.push([key, value, source]);
+    }
+  }
+
+  // Load public (plaintext) sources
+  for (const source of target.publicSources) {
+    const sourceFile = resolvePublicSourceFile(config, env, source);
+    await assertReadable(sourceFile, `compile ${targetName}/${env}: missing public source file "${source}"`);
+
+    const text = await fs.readFile(sourceFile, 'utf8');
+    const parsed = parseDotenv(text);
 
     for (const [key, value] of Object.entries(parsed)) {
       if (isPublicKeyName(key)) continue;
