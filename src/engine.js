@@ -233,8 +233,11 @@ export function resolveTargetOutput(config, targetName, env, override) {
   return resolveFrom(config.configDir, rendered);
 }
 
-export function resolveTargetKeyFile(config, targetName, env) {
+export function resolveTargetKeyFile(config, targetName, env, outputOverride) {
   const target = getTarget(config, targetName);
+  if (!target.keyFile) {
+    return `${resolveTargetOutput(config, targetName, env, outputOverride)}.keys`;
+  }
   const raw = typeof target.keyFile === 'object' ? resolveEnvMap(target.keyFile, env, targetName, 'keyFile') : target.keyFile;
   const rendered = renderTemplate(raw, { env, target: targetName });
   return resolveFrom(config.configDir, rendered);
@@ -358,7 +361,7 @@ export async function compileTarget(config, targetName, env, options = {}) {
   }
 
   const outputFile = resolveTargetOutput(config, targetName, env, options.out);
-  const keyFile = resolveTargetKeyFile(config, targetName, env);
+  const keyFile = resolveTargetKeyFile(config, targetName, env, options.out);
 
   if (options.dryRun) {
     return { ...composed, outputFile, keyFile, dryRun: true };

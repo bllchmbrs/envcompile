@@ -11,7 +11,7 @@ This tutorial walks through a complete local example:
 7. Decrypt the compiled file to prove the deployment bundle works.
 8. Change one source file and recompile.
 
-The example uses fake secrets and a local `./tutorial_secrets` folder so it is safe to run without touching your real `~/secrets/project` directory.
+The example uses fake secrets and a local `./tutorial_secrets` folder so it is safe to run without touching your real `~/secrets/<project>` directory.
 
 ## Prerequisites
 
@@ -174,13 +174,11 @@ environments:
 
 keyFilePatterns:
   source: '{env}/.env.{source}.keys'
-  target: compiled_env/{env}/.env.{target}.keys
 
 targets:
   api:
     description: API deployment bundle
     output: compiled_env/{env}/.env.api
-    keyFile: compiled_env/{env}/.env.api.keys
     sources:
       - stripe
       - cloudflare
@@ -195,7 +193,6 @@ targets:
   web:
     description: Web deployment bundle
     output: compiled_env/{env}/.env.web
-    keyFile: compiled_env/{env}/.env.web.keys
     sources:
       - stripe
     required:

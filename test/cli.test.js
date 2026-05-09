@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { parseDotenv, parsePrivateKeys } from '../src/dotenv.js';
+import { decryptFile } from '../src/dotenvx.js';
 import { parseArgs, main } from '../src/cli.js';
 
 test('parseArgs supports positional arguments and long options', () => {
@@ -26,6 +28,116 @@ test('parseArgs supports lint strict flag', () => {
       strict: true,
     },
   });
+});
+
+test('init writes keysDir from project option', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-init-'));
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    const output = [];
+    await main(['init', '--project', 'billing-api'], {
+      stdin: { isTTY: false },
+      stderrStream: { isTTY: false },
+      out: (msg) => output.push(msg),
+      err: () => {},
+    });
+
+    const content = await fs.readFile(path.join(tmpDir, 'envcompile.config.yaml'), 'utf8');
+    assert.match(content, /keysDir: ~\/secrets\/billing-api/);
+    assert.match(content, /targets: \{\}/);
+    assert.doesNotMatch(content, /stripe|cloudflare|defaults/);
+    assert.ok(output.some((line) => line.includes('~/secrets/billing-api')));
+
+    const sourcesOutput = [];
+    await main(['sources'], { out: (msg) => sourcesOutput.push(msg), err: () => {} });
+    assert.deepEqual(sourcesOutput, ['Private:', '  (none)', 'Public:', '  (none)']);
+  } finally {
+    process.chdir(origCwd);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('init prompt defaults to current folder name', async () => {
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-init-parent-'));
+  const tmpDir = path.join(parent, 'folder-default');
+  await fs.mkdir(tmpDir);
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    await main(['init'], {
+      promptText: async () => '',
+      out: () => {},
+      err: () => {},
+    });
+
+    const content = await fs.readFile(path.join(tmpDir, 'envcompile.config.yaml'), 'utf8');
+    assert.match(content, /keysDir: ~\/secrets\/folder-default/);
+  } finally {
+    process.chdir(origCwd);
+    await fs.rm(parent, { recursive: true, force: true });
+  }
+});
+
+test('env add updates YAML config and creates source directories', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-env-'));
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    await fs.writeFile(path.join(tmpDir, 'envcompile.config.yaml'), `version: 1
+
+privateDir: source_env_vars
+publicDir: public_env_vars
+keysDir: keys
+
+environments:
+  - dev
+  - prod
+
+targets:
+  api:
+    output: compiled/{env}/.env.api
+    sources:
+      - app
+`);
+
+    const output = [];
+    await main(['env', 'add', 'build'], { out: (msg) => output.push(msg), err: () => {} });
+    await main(['env', 'add', 'build'], { out: (msg) => output.push(msg), err: () => {} });
+
+    const content = await fs.readFile(path.join(tmpDir, 'envcompile.config.yaml'), 'utf8');
+    assert.equal((content.match(/build/g) || []).length, 1);
+    assert.ok(output.some((line) => line.includes('already exists')));
+
+    await fs.access(path.join(tmpDir, 'source_env_vars/build'));
+    await fs.access(path.join(tmpDir, 'public_env_vars/build'));
+  } finally {
+    process.chdir(origCwd);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('env add rejects invalid names', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-env-invalid-'));
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    await writeJsonConfig(tmpDir, {
+      version: 1,
+      privateDir: 'source_env_vars',
+      keysDir: 'keys',
+      environments: ['dev'],
+      targets: { api: { sources: ['app'], output: 'compiled/{env}/.env.api' } },
+    });
+
+    await assert.rejects(
+      main(['env', 'add', '../build'], { out: () => {}, err: () => {} }),
+      /Invalid environment name/,
+    );
+  } finally {
+    process.chdir(origCwd);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test('pre-commit command installs git hook', async () => {
@@ -138,3 +250,211 @@ test('gitignore command adds key ignore entries to source directories', async ()
     await fs.rm(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('sources commands update YAML config idempotently', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-sources-'));
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    await fs.writeFile(path.join(tmpDir, 'envcompile.config.yaml'), `version: 1
+
+privateDir: source_env_vars
+publicDir: public_env_vars
+keysDir: keys
+
+environments:
+  - dev
+
+targets:
+  api:
+    output: compiled/{env}/.env.api
+    sources:
+      - app
+`);
+
+    const output = [];
+    await main(['sources', 'add', 'billing', '--target', 'api'], { out: (msg) => output.push(msg), err: () => {} });
+    await main(['sources', 'add', 'billing', '--target', 'api'], { out: (msg) => output.push(msg), err: () => {} });
+    await main(['sources', 'add', 'defaults', '--target', 'api', '--public'], { out: (msg) => output.push(msg), err: () => {} });
+
+    const content = await fs.readFile(path.join(tmpDir, 'envcompile.config.yaml'), 'utf8');
+    assert.equal((content.match(/billing/g) || []).length, 1);
+    assert.match(content, /publicSources:\n\s+- defaults/);
+    assert.ok(output.some((line) => line.includes('already present')));
+
+    const listOutput = [];
+    await main(['sources', 'list', '--target', 'api'], { out: (msg) => listOutput.push(msg), err: () => {} });
+    assert.ok(listOutput.includes('Private:'));
+    assert.ok(listOutput.some((line) => line.includes('billing (api)')));
+    assert.ok(listOutput.some((line) => line.includes('defaults (api)')));
+
+    await main(['sources', 'remove', 'defaults', '--target', 'api', '--public'], { out: () => {}, err: () => {} });
+    const removedContent = await fs.readFile(path.join(tmpDir, 'envcompile.config.yaml'), 'utf8');
+    assert.doesNotMatch(removedContent, /defaults/);
+
+    await assert.rejects(
+      main(['group', 'list'], { out: () => {}, err: () => {} }),
+      /Unknown command "group"/,
+    );
+  } finally {
+    process.chdir(origCwd);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('private secret set provisions once, preserves keys, and creates backups', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-secret-'));
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    await writeJsonConfig(tmpDir, {
+      version: 1,
+      privateDir: 'source_env_vars',
+      keysDir: 'keys',
+      environments: ['dev'],
+      targets: { api: { sources: ['stripe'], output: 'compiled/{env}/.env.api' } },
+    });
+
+    await main(
+      ['secret', 'set', 'stripe', 'STRIPE_SECRET_KEY', '--env', 'dev', '--private', '--stdin'],
+      { stdin: 'sk_dev\n', out: () => {}, err: () => {} },
+    );
+
+    const sourceFile = path.join(tmpDir, 'source_env_vars/dev/.env.stripe');
+    const keyFile = path.join(tmpDir, 'keys/dev/.env.stripe.keys');
+    const firstKeys = parsePrivateKeys(await fs.readFile(keyFile, 'utf8'));
+    assert.ok(firstKeys.DOTENV_PRIVATE_KEY_STRIPE);
+
+    await main(
+      ['secret', 'set', 'stripe', 'STRIPE_PUBLISHABLE_KEY', '--env', 'dev', '--private', '--stdin'],
+      { stdin: 'pk_dev\n', out: () => {}, err: () => {} },
+    );
+
+    const secondKeys = parsePrivateKeys(await fs.readFile(keyFile, 'utf8'));
+    assert.deepEqual(secondKeys, firstKeys);
+
+    const decrypted = await decryptFile({ filePath: sourceFile, envKeysFile: keyFile, noOps: true });
+    const parsed = parseDotenv(decrypted);
+    assert.equal(parsed.STRIPE_SECRET_KEY, 'sk_dev');
+    assert.equal(parsed.STRIPE_PUBLISHABLE_KEY, 'pk_dev');
+
+    await main(
+      ['secret', 'unset', 'stripe', 'STRIPE_PUBLISHABLE_KEY', '--env', 'dev', '--private'],
+      { out: () => {}, err: () => {} },
+    );
+    const afterUnsetKeys = parsePrivateKeys(await fs.readFile(keyFile, 'utf8'));
+    assert.deepEqual(afterUnsetKeys, firstKeys);
+    const decryptedAfterUnset = await decryptFile({ filePath: sourceFile, envKeysFile: keyFile, noOps: true });
+    const parsedAfterUnset = parseDotenv(decryptedAfterUnset);
+    assert.equal(parsedAfterUnset.STRIPE_SECRET_KEY, 'sk_dev');
+    assert.equal(parsedAfterUnset.STRIPE_PUBLISHABLE_KEY, undefined);
+
+    const backupRoot = path.join(tmpDir, 'keys/.envcompile-backups');
+    const backupRuns = await fs.readdir(backupRoot);
+    assert.equal(backupRuns.length, 2);
+  } finally {
+    process.chdir(origCwd);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('public secret set writes plaintext without key files', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-public-secret-'));
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    await writeJsonConfig(tmpDir, {
+      version: 1,
+      privateDir: 'source_env_vars',
+      publicDir: 'public_env_vars',
+      keysDir: 'keys',
+      environments: ['dev'],
+      targets: {
+        web: {
+          sources: ['app'],
+          publicSources: ['defaults'],
+          output: 'compiled/{env}/.env.web',
+        },
+      },
+    });
+
+    await main(
+      ['secret', 'set', 'defaults', 'LOG_LEVEL', '--env', 'dev', '--public', '--stdin'],
+      { stdin: 'debug\n', out: () => {}, err: () => {} },
+    );
+
+    const publicFile = path.join(tmpDir, 'public_env_vars/dev/.env.defaults');
+    assert.equal(await fs.readFile(publicFile, 'utf8'), 'LOG_LEVEL="debug"\n');
+    await assert.rejects(fs.readFile(path.join(tmpDir, 'keys/dev/.env.defaults.keys'), 'utf8'), { code: 'ENOENT' });
+  } finally {
+    process.chdir(origCwd);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('secret commands fail for ambiguous type, invalid inputs, and non-tty prompt', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-secret-fail-'));
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    await writeJsonConfig(tmpDir, {
+      version: 1,
+      privateDir: 'source_env_vars',
+      publicDir: 'public_env_vars',
+      keysDir: 'keys',
+      environments: ['dev'],
+      targets: {
+        api: {
+          sources: ['shared'],
+          publicSources: ['shared'],
+          output: 'compiled/{env}/.env.api',
+        },
+      },
+    });
+
+    await assert.rejects(
+      main(['secret', 'set', 'shared', 'TOKEN', '--env', 'dev', '--stdin'], { stdin: 'value\n', out: () => {}, err: () => {} }),
+      /both private and public/,
+    );
+    await assert.rejects(
+      main(['sources', 'add', 'other', '--target', 'missing'], { out: () => {}, err: () => {} }),
+      /Unknown target/,
+    );
+    await assert.rejects(
+      main(['secret', 'set', 'shared', 'TOKEN', '--env', 'prod', '--private', '--stdin'], { stdin: 'value\n', out: () => {}, err: () => {} }),
+      /Unknown environment/,
+    );
+    await assert.rejects(
+      main(['secret', 'set', 'shared', '1BAD', '--env', 'dev', '--private', '--stdin'], { stdin: 'value\n', out: () => {}, err: () => {} }),
+      /Invalid secret key/,
+    );
+    await assert.rejects(
+      main(['secret', 'set', 'shared', 'TOKEN', '--env', 'dev', '--private'], {
+        stdin: { isTTY: false },
+        stderrStream: { isTTY: false },
+        out: () => {},
+        err: () => {},
+      }),
+      /requires --stdin/,
+    );
+
+    await writeJsonConfig(tmpDir, {
+      version: 1,
+      privateDir: 'source_env_vars',
+      keysDir: 'keys',
+      environments: ['dev'],
+      targets: { api: { sources: ['app'], output: 'compiled/{env}/.env.api' } },
+    });
+    await assert.rejects(
+      main(['secret', 'set', 'defaults', 'LOG_LEVEL', '--env', 'dev', '--public', '--stdin'], { stdin: 'debug\n', out: () => {}, err: () => {} }),
+      /publicDir is not configured/,
+    );
+  } finally {
+    process.chdir(origCwd);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+async function writeJsonConfig(dir, config) {
+  await fs.writeFile(path.join(dir, 'envcompile.config.json'), `${JSON.stringify(config, null, 2)}\n`);
+}

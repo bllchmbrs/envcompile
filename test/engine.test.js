@@ -122,6 +122,32 @@ test('compileTarget writes encrypted output and generated key file', async () =>
   });
 });
 
+test('compileTarget defaults target key file next to output file', async () => {
+  const fixture = await makeFixture();
+  delete fixture.config.targets.api.keyFile;
+
+  const result = await compileTarget(fixture.config, 'api', 'dev', {
+    dotenvxBin: fixture.dotenvxBin,
+  });
+
+  assert.equal(result.outputFile, path.join(fixture.config.configDir, 'compiled_env/dev/.env.api'));
+  assert.equal(result.keyFile, `${result.outputFile}.keys`);
+  assert.match(await fs.readFile(result.keyFile, 'utf8'), /DOTENV_PRIVATE_KEY_API/);
+});
+
+test('compileTarget defaults key file from output override when keyFile is omitted', async () => {
+  const fixture = await makeFixture();
+  delete fixture.config.targets.api.keyFile;
+
+  const result = await compileTarget(fixture.config, 'api', 'dev', {
+    dotenvxBin: fixture.dotenvxBin,
+    out: 'deploy/dev/.env.runtime',
+  });
+
+  assert.equal(result.outputFile, path.join(fixture.config.configDir, 'deploy/dev/.env.runtime'));
+  assert.equal(result.keyFile, path.join(fixture.config.configDir, 'deploy/dev/.env.runtime.keys'));
+});
+
 async function makeFixture(overrides = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-test-'));
   const sourceDir = path.join(root, 'source_env_vars');

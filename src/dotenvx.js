@@ -2,8 +2,13 @@ import { spawnFile } from './process.js';
 import { dotenvxError } from './errors.js';
 import { resolveDotenvxBin } from './dotenvx-bin.js';
 
-export async function decryptFile({ dotenvxBin, filePath, privateKeys }) {
-  const result = await spawnFile(resolveDotenvxBin(dotenvxBin), ['decrypt', '-f', filePath, '--stdout'], {
+export async function decryptFile({ dotenvxBin, filePath, privateKeys, envKeysFile, noOps = false }) {
+  const args = ['decrypt', '-f', filePath];
+  if (envKeysFile) args.push('-fk', envKeysFile);
+  if (noOps) args.push('--no-ops');
+  args.push('--stdout');
+
+  const result = await spawnFile(resolveDotenvxBin(dotenvxBin), args, {
     env: {
       ...process.env,
       ...privateKeys,
@@ -17,8 +22,12 @@ export async function decryptFile({ dotenvxBin, filePath, privateKeys }) {
   return result.stdout;
 }
 
-export async function encryptFile({ dotenvxBin, filePath, cwd }) {
-  const result = await spawnFile(resolveDotenvxBin(dotenvxBin), ['encrypt', '-f', filePath], {
+export async function encryptFile({ dotenvxBin, filePath, cwd, envKeysFile, noOps = false }) {
+  const args = ['encrypt', '-f', filePath];
+  if (envKeysFile) args.push('-fk', envKeysFile);
+  if (noOps) args.push('--no-ops');
+
+  const result = await spawnFile(resolveDotenvxBin(dotenvxBin), args, {
     cwd,
     env: process.env,
   });
