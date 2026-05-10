@@ -36,7 +36,10 @@ test('loadComposedTarget skips empty private sources without key files', async (
 
 test('loadComposedTarget reports duplicates when duplicatePolicy is error', async () => {
   const fixture = await makeFixture({
-    cloudflare: 'STRIPE_SECRET_KEY=duplicate\nCLOUDFLARE_API_TOKEN=cf_dev\n',
+    cloudflare: encryptedSource({
+      STRIPE_SECRET_KEY: 'duplicate',
+      CLOUDFLARE_API_TOKEN: 'cf_dev',
+    }),
   });
 
   const composed = await loadComposedTarget(fixture.config, 'api', 'dev', {
@@ -49,7 +52,10 @@ test('loadComposedTarget reports duplicates when duplicatePolicy is error', asyn
 
 test('lintTargets warns on duplicates allowed by duplicatePolicy', async () => {
   const fixture = await makeFixture({
-    cloudflare: 'STRIPE_SECRET_KEY=duplicate\nCLOUDFLARE_API_TOKEN=cf_dev\n',
+    cloudflare: encryptedSource({
+      STRIPE_SECRET_KEY: 'duplicate',
+      CLOUDFLARE_API_TOKEN: 'cf_dev',
+    }),
     duplicatePolicy: 'first-wins',
   });
 
@@ -69,7 +75,10 @@ test('lintTargets warns on duplicates allowed by duplicatePolicy', async () => {
 
 test('lintTargets strict mode fails on duplicate keys', async () => {
   const fixture = await makeFixture({
-    cloudflare: 'STRIPE_SECRET_KEY=duplicate\nCLOUDFLARE_API_TOKEN=cf_dev\n',
+    cloudflare: encryptedSource({
+      STRIPE_SECRET_KEY: 'duplicate',
+      CLOUDFLARE_API_TOKEN: 'cf_dev',
+    }),
     duplicatePolicy: 'first-wins',
   });
 
@@ -152,6 +161,36 @@ test('compileTarget writes encrypted output and generated key file', async () =>
   });
 });
 
+test('compileTarget can write plaintext output without generating a target key', async () => {
+  const fixture = await makeFixture();
+  const result = await compileTarget(fixture.config, 'api', 'dev', {
+    dotenvxBin: fixture.dotenvxBin,
+    noEncrypt: true,
+  });
+
+  assert.equal(result.dryRun, false);
+  assert.equal(result.encrypted, false);
+  assert.equal(result.keyFile, null);
+  const output = await fs.readFile(result.outputFile, 'utf8');
+  assert.doesNotMatch(output, /DOTENV_PUBLIC_KEY/);
+  assert.match(output, /STRIPE_SECRET_KEY="sk_dev"/);
+  assert.match(output, /CLOUDFLARE_API_TOKEN="cf_dev"/);
+  await assert.rejects(fs.access(path.join(fixture.config.configDir, 'compiled_env/dev/.env.api.keys')), { code: 'ENOENT' });
+});
+
+test('compileTarget rejects unencrypted private sources before writing output', async () => {
+  const fixture = await makeFixture();
+  await fs.writeFile(path.join(fixture.config.sourceDir, 'dev/.env.stripe'), 'STRIPE_SECRET_KEY=sk_dev\n');
+
+  await assert.rejects(
+    compileTarget(fixture.config, 'api', 'dev', {
+      dotenvxBin: fixture.dotenvxBin,
+    }),
+    /source "stripe" is not encrypted/,
+  );
+  await assert.rejects(fs.access(path.join(fixture.config.configDir, 'compiled_env/dev/.env.api')), { code: 'ENOENT' });
+});
+
 test('compileTarget rejects targets without sources', async () => {
   const fixture = await makeFixture();
   fixture.config.targets.empty = {
@@ -206,8 +245,8 @@ async function makeFixture(overrides = {}) {
   await fs.mkdir(path.join(sourceDir, 'dev'), { recursive: true });
   await fs.mkdir(path.join(keysDir, 'dev'), { recursive: true });
 
-  await fs.writeFile(path.join(sourceDir, 'dev/.env.stripe'), overrides.stripe || 'STRIPE_SECRET_KEY=sk_dev\n');
-  await fs.writeFile(path.join(sourceDir, 'dev/.env.cloudflare'), overrides.cloudflare || 'CLOUDFLARE_API_TOKEN=cf_dev\n');
+  await fs.writeFile(path.join(sourceDir, 'dev/.env.stripe'), overrides.stripe || encryptedSource({ STRIPE_SECRET_KEY: 'sk_dev' }));
+  await fs.writeFile(path.join(sourceDir, 'dev/.env.cloudflare'), overrides.cloudflare || encryptedSource({ CLOUDFLARE_API_TOKEN: 'cf_dev' }));
   await fs.writeFile(path.join(keysDir, 'dev/.env.stripe.keys'), 'DOTENV_PRIVATE_KEY_STRIPE=private\n');
   await fs.writeFile(path.join(keysDir, 'dev/.env.cloudflare.keys'), 'DOTENV_PRIVATE_KEY_CLOUDFLARE=private\n');
 
@@ -218,7 +257,10 @@ import path from 'node:path';
 
 const [command, flag, file] = process.argv.slice(2);
 if (command === 'decrypt') {
-  process.stdout.write(fs.readFileSync(file, 'utf8'));
+  const text = fs.readFileSync(file, 'utf8')
+    .replace(/^DOTENV_PUBLIC_KEY(?:_[A-Z0-9_]+)?=.*\\n?/gm, '')
+    .replace(/=("|')?encrypted:([^"'\\n]+)\\1/g, '=$2');
+  process.stdout.write(text);
   process.exit(0);
 }
 if (command === 'encrypt') {
@@ -258,4 +300,12 @@ process.exit(9);
       },
     },
   };
+}
+
+function encryptedSource(entries) {
+  const lines = ['DOTENV_PUBLIC_KEY="public"'];
+  for (const [key, value] of Object.entries(entries)) {
+    lines.push(`${key}="encrypted:${value}"`);
+  }
+  return `${lines.join('\n')}\n`;
 }

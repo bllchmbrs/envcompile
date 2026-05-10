@@ -321,23 +321,26 @@ export async function loadComposedTarget(config, targetName, env, options = {}) 
     const sourceText = await fs.readFile(sourceFile, 'utf8');
     if (sourceText.trim() === '') continue;
 
-    let resolvedText = sourceText;
-    if (isFileEncrypted(sourceText)) {
-      await assertReadable(sourceKeyFile, `compile ${targetName}/${env}: missing key file for source "${source}"`);
-
-      const keyText = await fs.readFile(sourceKeyFile, 'utf8');
-      const privateKeys = parsePrivateKeys(keyText);
-      if (Object.keys(privateKeys).length === 0) {
-        throw new EnvcompileError(`No DOTENV_PRIVATE_KEY entries found in ${sourceKeyFile}`, 1);
-      }
-
-      resolvedText = await decryptFile({
-        dotenvxBin: options.dotenvxBin,
-        filePath: sourceFile,
-        privateKeys,
-      });
+    if (!isFileEncrypted(sourceText)) {
+      throw new EnvcompileError(
+        `compile ${targetName}/${env}: source "${source}" is not encrypted: ${sourceFile}. Run envcompile encrypt ${source} --env ${env} before compiling.`,
+        1,
+      );
     }
 
+    await assertReadable(sourceKeyFile, `compile ${targetName}/${env}: missing key file for source "${source}"`);
+
+    const keyText = await fs.readFile(sourceKeyFile, 'utf8');
+    const privateKeys = parsePrivateKeys(keyText);
+    if (Object.keys(privateKeys).length === 0) {
+      throw new EnvcompileError(`No DOTENV_PRIVATE_KEY entries found in ${sourceKeyFile}`, 1);
+    }
+
+    const resolvedText = await decryptFile({
+      dotenvxBin: options.dotenvxBin,
+      filePath: sourceFile,
+      privateKeys,
+    });
     const parsed = parseDotenv(resolvedText);
 
     for (const [key, value] of Object.entries(parsed)) {
@@ -428,15 +431,31 @@ export async function compileTarget(config, targetName, env, options = {}) {
   }
 
   const outputFile = resolveTargetOutput(config, targetName, env, options.out);
-  const keyFile = resolveTargetKeyFile(config, targetName, env, options.out);
+  const keyFile = options.noEncrypt ? null : resolveTargetKeyFile(config, targetName, env, options.out);
 
   if (options.dryRun) {
-    return { ...composed, outputFile, keyFile, dryRun: true };
+    return { ...composed, outputFile, keyFile, dryRun: true, encrypted: !options.noEncrypt };
   }
 
   const context = `${targetName}/${env}`;
   await assertWritableDestination(outputFile, options.force, `compile ${context}: output file`);
-  await assertWritableDestination(keyFile, options.force, `compile ${context}: key file`);
+  if (keyFile) {
+    await assertWritableDestination(keyFile, options.force, `compile ${context}: key file`);
+  }
+
+  if (options.noEncrypt) {
+    await fs.mkdir(path.dirname(outputFile), { recursive: true });
+    await fs.writeFile(outputFile, stringifyDotenv(composed.entries), { mode: 0o600 });
+    await fs.chmod(outputFile, 0o600);
+    return {
+      ...composed,
+      outputFile,
+      keyFile: null,
+      privateKeys: {},
+      dryRun: false,
+      encrypted: false,
+    };
+  }
 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-'));
   try {
@@ -464,6 +483,7 @@ export async function compileTarget(config, targetName, env, options = {}) {
       keyFile,
       privateKeys,
       dryRun: false,
+      encrypted: true,
     };
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });

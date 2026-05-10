@@ -501,5 +501,5 @@ rm -rf source_env_vars compiled_env tutorial_secrets envcompile.config.yaml .env
 - Source env files are encrypted and can be committed.
 - Source private keys stay outside the source env tree.
 - Targets declare which sources they need.
-- `envcompile` decrypts sources, validates the combined key set, writes one compiled env file, and encrypts it with a new deployment-specific key.
+- By default, `envcompile` decrypts sources, validates the combined key set, writes one compiled env file, and encrypts it with a new deployment-specific key.
 - Changing a source secret requires updating only that source, then recompiling any affected targets.

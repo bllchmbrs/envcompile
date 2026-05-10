@@ -16,6 +16,7 @@ import {
   resolvePublicSourceFile,
   resolveSourceKeyFile,
   resolveTargetOutput,
+  resolveTargetKeyFile,
   validateConfig,
 } from './engine.js';
 import { EnvcompileError, configError } from './errors.js';
@@ -32,7 +33,7 @@ Usage:
   envcompile targets add <name> [--output <path>] [--description <text>] [--config <path>]
   envcompile targets remove <name> [--config <path>]
   envcompile connect <target> <source...> [--public] [--config <path>]
-  envcompile compile <target> --env <env> [--out <path>] [--dry-run] [--force] [--print-key] [--dotenvx <bin>]
+  envcompile compile <target> --env <env> [--out <path>] [--dry-run] [--force] [--no-encrypt] [--print-key] [--dotenvx <bin>]
   envcompile check [target] [--env <env>] [--dotenvx <bin>]
   envcompile lint [target] [--env <env>] [--strict] [--dotenvx <bin>]
   envcompile compare [target] [--env <a,b,c>] [--source <source>] [--dotenvx <bin>]
@@ -135,7 +136,7 @@ export function parseArgs(argv) {
 
     const [rawName, inlineValue] = token.slice(2).split(/=(.*)/s, 2);
     const name = rawName.replace(/-([a-z])/g, (_, char) => char.toUpperCase());
-    if (['dryRun', 'force', 'printKey', 'private', 'public', 'showValues', 'stdin', 'strict', 'yes'].includes(name)) {
+    if (['dryRun', 'force', 'noEncrypt', 'printKey', 'private', 'public', 'showValues', 'stdin', 'strict', 'yes'].includes(name)) {
       options[name] = true;
       continue;
     }
@@ -351,25 +352,37 @@ async function compileCommand(positional, options, io) {
   const targetName = positional[0];
   if (!targetName) throw configError('compile requires a target.');
   if (!options.env) throw configError('compile requires --env <env>.');
+  if (options.noEncrypt && options.printKey) {
+    throw new EnvcompileError('compile --print-key cannot be used with --no-encrypt.', 1);
+  }
 
   const { config } = await loadConfig(process.cwd(), options.config);
   const result = await compileTarget(config, targetName, options.env, {
     dotenvxBin: options.dotenvx,
     dryRun: Boolean(options.dryRun),
     force: Boolean(options.force),
+    noEncrypt: Boolean(options.noEncrypt),
     out: options.out,
   });
 
   if (result.dryRun) {
     io.out(`Dry run ok: ${targetName}/${options.env}`);
     io.out(`Would write ${toDisplayPath(result.outputFile)}`);
-    io.out(`Would write ${toDisplayPath(result.keyFile)}`);
+    if (result.keyFile) {
+      io.out(`Would write ${toDisplayPath(result.keyFile)}`);
+    } else {
+      io.out('Would skip target encryption and key file');
+    }
     return;
   }
 
   io.out(`Compiled ${targetName}/${options.env}`);
   io.out(`Env:  ${toDisplayPath(result.outputFile)}`);
-  io.out(`Keys: ${toDisplayPath(result.keyFile)}`);
+  if (result.keyFile) {
+    io.out(`Keys: ${toDisplayPath(result.keyFile)}`);
+  } else {
+    io.out('Keys: (none; --no-encrypt)');
+  }
 
   if (options.printKey) {
     for (const [key, value] of Object.entries(result.privateKeys || {})) {
@@ -826,11 +839,20 @@ const TARGET_GITIGNORE_LINES = [
   '*.keys',
 ];
 
-function buildSourceGitignoreLines(sources) {
-  const lines = ['# envcompile: ignore private keys'];
-  lines.push('*.keys');
-  return lines;
-}
+const SOURCE_GITIGNORE_LINES = [
+  '# envcompile: ignore private keys',
+  '*.keys',
+];
+
+const SOURCE_KEY_FILE_GITIGNORE_LINES = [
+  '# envcompile: ignore private keys',
+  '*.keys',
+];
+
+const SOURCE_KEY_ROOT_GITIGNORE_LINES = [
+  ...SOURCE_KEY_FILE_GITIGNORE_LINES,
+  '.envcompile-backups/',
+];
 
 async function updateGitignore(dirPath, lines) {
   const gitignorePath = path.join(dirPath, '.gitignore');
@@ -862,8 +884,6 @@ async function gitignoreCommand(options, io) {
     for (const source of target.sources) allSources.add(source);
   }
 
-  const sourceGitignoreLines = buildSourceGitignoreLines(allSources);
-
   // Update .gitignore in sourceDir and each environment subdirectory
   const sourceDirs = [sourceDir];
   for (const env of config.environments) {
@@ -877,38 +897,67 @@ async function gitignoreCommand(options, io) {
     } catch {
       continue;
     }
-    if (await updateGitignore(dir, sourceGitignoreLines)) {
+    if (await updateGitignore(dir, SOURCE_GITIGNORE_LINES)) {
       io.out(`Updated ${toDisplayPath(path.join(dir, '.gitignore'))}`);
       updated++;
     }
   }
 
-  // Update .gitignore in target output directories with *.keys and compiled output files
-  const targetOutputsByDir = new Map();
-  for (const [targetName] of Object.entries(config.targets)) {
+  // Update .gitignore in source key directories, including secret backups.
+  const sourceKeyLinesByDir = new Map([
+    [config.keysDir, SOURCE_KEY_ROOT_GITIGNORE_LINES],
+  ]);
+  for (const source of allSources) {
     for (const env of config.environments) {
-      const outputFile = resolveTargetOutput(config, targetName, env);
-      const dir = path.dirname(outputFile);
-      if (!targetOutputsByDir.has(dir)) targetOutputsByDir.set(dir, []);
-      targetOutputsByDir.get(dir).push(path.basename(outputFile));
+      const dir = path.dirname(resolveSourceKeyFile(config, env, source));
+      if (!sourceKeyLinesByDir.has(dir)) {
+        sourceKeyLinesByDir.set(dir, SOURCE_KEY_FILE_GITIGNORE_LINES);
+      }
     }
   }
 
-  for (const [dir, outputFiles] of targetOutputsByDir) {
-    const lines = [
-      ...TARGET_GITIGNORE_LINES,
-      '# envcompile: ignore compiled output',
-      ...([...new Set(outputFiles)].sort()),
-    ];
-    await fs.mkdir(dir, { recursive: true });
+  for (const [dir, lines] of sourceKeyLinesByDir) {
+    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
     if (await updateGitignore(dir, lines)) {
       io.out(`Updated ${toDisplayPath(path.join(dir, '.gitignore'))}`);
       updated++;
     }
   }
 
+  // Update .gitignore in target output and key directories.
+  const targetLinesByDir = new Map();
+  const addTargetLines = (dir, lines) => {
+    if (!targetLinesByDir.has(dir)) targetLinesByDir.set(dir, new Set());
+    const targetLines = targetLinesByDir.get(dir);
+    for (const line of lines) targetLines.add(line);
+  };
+
+  for (const [targetName] of Object.entries(config.targets)) {
+    for (const env of config.environments) {
+      const outputFile = resolveTargetOutput(config, targetName, env);
+      const keyFile = resolveTargetKeyFile(config, targetName, env);
+      addTargetLines(path.dirname(outputFile), [
+        ...TARGET_GITIGNORE_LINES,
+        '# envcompile: ignore compiled output',
+        path.basename(outputFile),
+      ]);
+      addTargetLines(path.dirname(keyFile), [
+        ...TARGET_GITIGNORE_LINES,
+        path.basename(keyFile),
+      ]);
+    }
+  }
+
+  for (const [dir, lines] of targetLinesByDir) {
+    await fs.mkdir(dir, { recursive: true });
+    if (await updateGitignore(dir, [...lines])) {
+      io.out(`Updated ${toDisplayPath(path.join(dir, '.gitignore'))}`);
+      updated++;
+    }
+  }
+
   if (updated === 0) {
-    io.out('.gitignore already has envcompile entries in all source and target directories.');
+    io.out('.gitignore already has envcompile entries in all source, key, and target directories.');
   }
 }
 

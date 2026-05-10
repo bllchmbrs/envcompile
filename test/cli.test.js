@@ -9,12 +9,13 @@ import { parseArgs, main } from '../src/cli.js';
 import { resolveSecretType } from '../src/secret-admin.js';
 
 test('parseArgs supports positional arguments and long options', () => {
-  assert.deepEqual(parseArgs(['compile', 'api', '--env', 'prod', '--dry-run', '--out=deploy/.env']), {
+  assert.deepEqual(parseArgs(['compile', 'api', '--env', 'prod', '--dry-run', '--no-encrypt', '--out=deploy/.env']), {
     command: 'compile',
     positional: ['api'],
     options: {
       env: 'prod',
       dryRun: true,
+      noEncrypt: true,
       out: 'deploy/.env',
     },
   });
@@ -272,7 +273,7 @@ test('pre-commit hook detects unencrypted env files', async () => {
   }
 });
 
-test('gitignore command adds key ignore entries to source directories', async () => {
+test('gitignore command adds ignore entries for source, key, and target directories', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-cli-'));
   const origCwd = process.cwd();
   process.chdir(tmpDir);
@@ -282,9 +283,15 @@ test('gitignore command adds key ignore entries to source directories', async ()
     await fs.writeFile(path.join(tmpDir, 'envcompile.config.json'), JSON.stringify({
       version: 1,
       sourceDir: 'source_env_vars',
-      keysDir: 'source_env_vars',
+      keysDir: 'keys',
       environments: ['dev'],
-      targets: { api: { sources: ['app'], output: 'compiled/{env}/.env.api' } },
+      targets: {
+        api: {
+          sources: ['app'],
+          output: 'compiled/{env}/.env.api',
+          keyFile: 'target_keys/{env}/api.private',
+        },
+      },
     }));
 
     const output = [];
@@ -297,10 +304,21 @@ test('gitignore command adds key ignore entries to source directories', async ()
     const devContent = await fs.readFile(path.join(sourceDir, 'dev', '.gitignore'), 'utf8');
     assert.ok(devContent.includes('*.keys'));
 
-    // Should update .gitignore in target output directories with *.keys and compiled output files
+    // Should update .gitignore in source key directories, including backup ignores
+    const keyRootContent = await fs.readFile(path.join(tmpDir, 'keys', '.gitignore'), 'utf8');
+    assert.ok(keyRootContent.includes('*.keys'));
+    assert.ok(keyRootContent.includes('.envcompile-backups/'));
+
+    const keyEnvContent = await fs.readFile(path.join(tmpDir, 'keys', 'dev', '.gitignore'), 'utf8');
+    assert.ok(keyEnvContent.includes('*.keys'));
+
+    // Should update .gitignore in target output and explicit target key directories
     const targetContent = await fs.readFile(path.join(tmpDir, 'compiled', 'dev', '.gitignore'), 'utf8');
     assert.ok(targetContent.includes('*.keys'));
     assert.ok(targetContent.includes('.env.api'), 'should ignore compiled output file');
+
+    const targetKeyContent = await fs.readFile(path.join(tmpDir, 'target_keys', 'dev', '.gitignore'), 'utf8');
+    assert.ok(targetKeyContent.includes('api.private'), 'should ignore explicit target key file');
 
     // Should NOT create .gitignore in project root
     await assert.rejects(fs.readFile(path.join(tmpDir, '.gitignore'), 'utf8'), { code: 'ENOENT' });
@@ -309,6 +327,45 @@ test('gitignore command adds key ignore entries to source directories', async ()
     const output2 = [];
     await main(['gitignore'], { out: (msg) => output2.push(msg), err: () => {} });
     assert.ok(output2[0].includes('already'));
+  } finally {
+    process.chdir(origCwd);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('compile --no-encrypt writes plaintext output and skips target key file', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-no-encrypt-'));
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    await fs.mkdir(path.join(tmpDir, 'source_env_vars/dev'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, 'keys/dev'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, 'source_env_vars/dev/.env.app'), encryptedSource({ APP_SECRET: 'secret_dev' }));
+    await fs.writeFile(path.join(tmpDir, 'keys/dev/.env.app.keys'), 'DOTENV_PRIVATE_KEY_APP=private\n');
+    const dotenvxBin = await writeFakeDotenvx(tmpDir);
+    await writeJsonConfig(tmpDir, {
+      version: 1,
+      privateDir: 'source_env_vars',
+      keysDir: 'keys',
+      environments: ['dev'],
+      targets: {
+        api: {
+          sources: ['app'],
+          output: 'compiled/{env}/.env.api',
+        },
+      },
+    });
+
+    const output = [];
+    await main(['compile', 'api', '--env', 'dev', '--no-encrypt', '--dotenvx', dotenvxBin], {
+      out: (msg) => output.push(msg),
+      err: () => {},
+    });
+
+    assert.ok(output.includes('Keys: (none; --no-encrypt)'));
+    const compiled = await fs.readFile(path.join(tmpDir, 'compiled/dev/.env.api'), 'utf8');
+    assert.equal(compiled, 'APP_SECRET="secret_dev"\n');
+    await assert.rejects(fs.access(path.join(tmpDir, 'compiled/dev/.env.api.keys')), { code: 'ENOENT' });
   } finally {
     process.chdir(origCwd);
     await fs.rm(tmpDir, { recursive: true, force: true });
@@ -670,4 +727,31 @@ test('secret commands fail for ambiguous type, invalid inputs, and non-tty promp
 
 async function writeJsonConfig(dir, config) {
   await fs.writeFile(path.join(dir, 'envcompile.config.json'), `${JSON.stringify(config, null, 2)}\n`);
+}
+
+async function writeFakeDotenvx(dir) {
+  const dotenvxBin = path.join(dir, 'fake-dotenvx.js');
+  await fs.writeFile(dotenvxBin, `#!/usr/bin/env node
+import fs from 'node:fs';
+
+const [command, flag, file] = process.argv.slice(2);
+if (command === 'decrypt') {
+  const text = fs.readFileSync(file, 'utf8')
+    .replace(/^DOTENV_PUBLIC_KEY(?:_[A-Z0-9_]+)?=.*\\n?/gm, '')
+    .replace(/=("|')?encrypted:([^"'\\n]+)\\1/g, '=$2');
+  process.stdout.write(text);
+  process.exit(0);
+}
+process.exit(8);
+`);
+  await fs.chmod(dotenvxBin, 0o755);
+  return dotenvxBin;
+}
+
+function encryptedSource(entries) {
+  const lines = ['DOTENV_PUBLIC_KEY="public"'];
+  for (const [key, value] of Object.entries(entries)) {
+    lines.push(`${key}="encrypted:${value}"`);
+  }
+  return `${lines.join('\n')}\n`;
 }
