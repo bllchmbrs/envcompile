@@ -24,9 +24,11 @@ test('parsePrivateKeys returns dotenvx private key entries only', () => {
   expect(parsePrivateKeys(`
 DOTENV_PUBLIC_KEY="public"
 DOTENV_PRIVATE_KEY_API="private"
+DOTENV_PRIVATE_KEY_GOOGLE-CALENDAR-AUTH="hyphenated"
 OTHER=value
 `)).toEqual({
     DOTENV_PRIVATE_KEY_API: 'private',
+    'DOTENV_PRIVATE_KEY_GOOGLE-CALENDAR-AUTH': 'hyphenated',
   });
 });
 

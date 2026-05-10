@@ -1,5 +1,5 @@
 const DOTENV_PUBLIC_KEY_RE = /^DOTENV_PUBLIC_KEY(?:_[A-Z0-9_]+)?$/;
-const DOTENV_PRIVATE_KEY_RE = /^DOTENV_PRIVATE_KEY(?:_[A-Z0-9_]+)?$/;
+const DOTENV_PRIVATE_KEY_RE = /^DOTENV_PRIVATE_KEY(?:_[A-Za-z0-9_.-]+)?$/;
 
 export function parseDotenv(text) {
   const env = {};
@@ -24,10 +24,25 @@ export function parseDotenv(text) {
 }
 
 export function parsePrivateKeys(text) {
-  const parsed = parseDotenv(text);
-  return Object.fromEntries(
-    Object.entries(parsed).filter(([key]) => DOTENV_PRIVATE_KEY_RE.test(key)),
-  );
+  const privateKeys = {};
+  const lines = String(text || '').split(/\r?\n/);
+
+  for (const rawLine of lines) {
+    let line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    if (line.startsWith('export ')) line = line.slice(7).trim();
+
+    const equalsIndex = findUnquotedEquals(line);
+    if (equalsIndex === -1) continue;
+
+    const key = line.slice(0, equalsIndex).trim();
+    if (!DOTENV_PRIVATE_KEY_RE.test(key)) continue;
+
+    const rawValue = line.slice(equalsIndex + 1).trim();
+    privateKeys[key] = parseValue(rawValue);
+  }
+
+  return privateKeys;
 }
 
 export function isPublicKeyName(key) {
