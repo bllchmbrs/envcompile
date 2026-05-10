@@ -385,6 +385,136 @@ targets:
   }
 });
 
+test('connect attaches configured private sources to a target idempotently', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-connect-'));
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    await fs.writeFile(path.join(tmpDir, 'envcompile.config.yaml'), `version: 1
+
+privateDir: source_env_vars
+keysDir: keys
+
+environments:
+  - dev
+
+sources:
+  - stripe
+  - cloudflare
+  - billing
+
+targets:
+  api:
+    output: compiled/{env}/.env.api
+    sources:
+      - stripe
+`);
+
+    const output = [];
+    await main(['connect', 'api', 'cloudflare'], { out: (msg) => output.push(msg), err: () => {} });
+    await main(['connect', 'api', 'billing', 'cloudflare'], { out: (msg) => output.push(msg), err: () => {} });
+
+    const content = await fs.readFile(path.join(tmpDir, 'envcompile.config.yaml'), 'utf8');
+    assert.equal((content.match(/cloudflare/g) || []).length, 2);
+    assert.match(content, /sources:\n\s+- stripe\n\s+- cloudflare\n\s+- billing/);
+    assert.match(content, /api:\n\s+output: compiled\/\{env\}\/\.env\.api\n\s+sources:\n\s+- stripe\n\s+- cloudflare\n\s+- billing/);
+    assert.ok(output.includes('Connected private source cloudflare to api'));
+    assert.ok(output.includes('Connected private source billing to api'));
+    assert.ok(output.includes('private source cloudflare is already connected to api'));
+
+    await assert.rejects(
+      fs.access(path.join(tmpDir, 'source_env_vars/dev/.env.cloudflare')),
+      { code: 'ENOENT' },
+    );
+  } finally {
+    process.chdir(origCwd);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('connect validates targets and configured private sources before saving', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-connect-invalid-'));
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    await writeJsonConfig(tmpDir, {
+      version: 1,
+      privateDir: 'source_env_vars',
+      keysDir: 'keys',
+      environments: ['dev'],
+      sources: ['stripe'],
+      targets: {
+        api: { output: 'compiled/{env}/.env.api', sources: [] },
+      },
+    });
+
+    await assert.rejects(
+      main(['connect', 'missing', 'stripe'], { out: () => {}, err: () => {} }),
+      /Unknown target "missing"/,
+    );
+    await assert.rejects(
+      main(['connect', 'api', 'billing'], { out: () => {}, err: () => {} }),
+      /Unknown private source "billing".*envcompile sources add billing/,
+    );
+
+    const content = JSON.parse(await fs.readFile(path.join(tmpDir, 'envcompile.config.json'), 'utf8'));
+    assert.deepEqual(content.targets.api.sources, []);
+  } finally {
+    process.chdir(origCwd);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('connect attaches configured public sources and validates public setup', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-connect-public-'));
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    await writeJsonConfig(tmpDir, {
+      version: 1,
+      privateDir: 'source_env_vars',
+      publicDir: 'public_env_vars',
+      keysDir: 'keys',
+      environments: ['dev'],
+      publicSources: ['defaults'],
+      targets: {
+        web: { output: 'compiled/{env}/.env.web', sources: [] },
+      },
+    });
+
+    const output = [];
+    await main(['connect', 'web', 'defaults', '--public'], { out: (msg) => output.push(msg), err: () => {} });
+    await main(['connect', 'web', 'defaults', '--public'], { out: (msg) => output.push(msg), err: () => {} });
+
+    const content = JSON.parse(await fs.readFile(path.join(tmpDir, 'envcompile.config.json'), 'utf8'));
+    assert.deepEqual(content.targets.web.publicSources, ['defaults']);
+    assert.ok(output.includes('Connected public source defaults to web'));
+    assert.ok(output.includes('public source defaults is already connected to web'));
+
+    await assert.rejects(
+      main(['connect', 'web', 'theme', '--public'], { out: () => {}, err: () => {} }),
+      /Unknown public source "theme".*envcompile sources add theme --public/,
+    );
+
+    await writeJsonConfig(tmpDir, {
+      version: 1,
+      privateDir: 'source_env_vars',
+      keysDir: 'keys',
+      environments: ['dev'],
+      targets: {
+        web: { output: 'compiled/{env}/.env.web', sources: [] },
+      },
+    });
+    await assert.rejects(
+      main(['connect', 'web', 'defaults', '--public'], { out: () => {}, err: () => {} }),
+      /publicDir is not configured/,
+    );
+  } finally {
+    process.chdir(origCwd);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('private secret set provisions once, preserves keys, and creates backups', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-secret-'));
   const origCwd = process.cwd();

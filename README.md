@@ -150,7 +150,7 @@ envcompile targets add web --output 'compiled_env/{env}/.env.web'
 envcompile targets remove old-api
 ```
 
-`targets add` creates a target with no sources. Attach sources afterward with `envcompile sources add <source> --target <target>`.
+`targets add` creates a target with no sources. Attach existing configured sources afterward with `envcompile connect <target> <source...>`.
 
 List and update configured sources, or attach them to targets:
 
@@ -166,6 +166,19 @@ envcompile sources remove defaults --target api --public
 ```
 
 `sources add` creates an empty `.env.<source>` file for each configured environment under `privateDir` or `publicDir`, without overwriting existing files. Private key files are created later when you set a private secret or encrypt the source.
+
+Connect already configured sources to targets with validation:
+
+```bash
+envcompile sources add stripe
+envcompile sources add cloudflare
+envcompile sources add defaults --public
+envcompile targets add api
+envcompile connect api stripe cloudflare
+envcompile connect api defaults --public
+```
+
+`connect` requires the target and source to already exist in the config. It does not create source files.
 
 Set and unset values without editing config or source files by hand:
 

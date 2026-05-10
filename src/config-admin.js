@@ -152,6 +152,61 @@ export async function updateSourceMembership(cwd, explicitPath, options) {
   return { changed, configPath, sourceName: options.sourceName, targetName: options.targetName, type, files };
 }
 
+export async function connectSourcesToTarget(cwd, explicitPath, options) {
+  assertTargetName(options.targetName);
+  const sourceNames = [...new Set(options.sourceNames || [])];
+  for (const sourceName of sourceNames) assertSourceName(sourceName);
+
+  const editable = await loadEditableConfig(cwd, explicitPath);
+  const { config, configPath, isJson } = editable;
+  const target = config.targets[options.targetName];
+  if (!target) {
+    throw configError(`Unknown target "${options.targetName}". Available targets: ${Object.keys(config.targets).join(', ')}`);
+  }
+  if (options.publicSource && !config.publicDir) {
+    throw configError('Cannot use public sources because publicDir is not configured.');
+  }
+
+  const field = options.publicSource ? 'publicSources' : 'sources';
+  const type = options.publicSource ? 'public' : 'private';
+  const configuredSources = options.publicSource ? config.publicSources : config.sources;
+  const missingSource = sourceNames.find((sourceName) => !configuredSources.includes(sourceName));
+  if (missingSource) {
+    const publicFlag = options.publicSource ? ' --public' : '';
+    throw configError(`Unknown ${type} source "${missingSource}". Add it first with envcompile sources add ${missingSource}${publicFlag}.`);
+  }
+
+  const results = [];
+  let changed = false;
+  for (const sourceName of sourceNames) {
+    const updateOptions = {
+      action: 'add',
+      targetName: options.targetName,
+      field,
+      sourceName,
+    };
+    const sourceChanged = isJson
+      ? updateJsonMembership(editable.raw, updateOptions)
+      : updateYamlMembership(editable.yaml, editable.yamlModule, updateOptions);
+    changed = changed || sourceChanged;
+    results.push({ sourceName, changed: sourceChanged });
+  }
+
+  if (changed) {
+    const raw = editable.isJson ? editable.raw : editable.yaml.toJS();
+    normalizeConfig(raw, path.dirname(configPath));
+    await saveEditableConfig(editable);
+  }
+
+  return {
+    changed,
+    configPath,
+    targetName: options.targetName,
+    type,
+    sources: results,
+  };
+}
+
 export async function updateTarget(cwd, explicitPath, options) {
   assertTargetName(options.targetName);
   const editable = await loadEditableConfig(cwd, explicitPath);

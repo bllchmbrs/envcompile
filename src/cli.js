@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { loadConfig } from './config.js';
-import { listConfiguredSources, updateEnvironment, updateSourceMembership, updateTarget } from './config-admin.js';
+import { connectSourcesToTarget, listConfiguredSources, updateEnvironment, updateSourceMembership, updateTarget } from './config-admin.js';
 import {
   checkTargets,
   compareTarget,
@@ -31,6 +31,7 @@ Usage:
   envcompile targets [list] [--config <path>]
   envcompile targets add <name> [--output <path>] [--description <text>] [--config <path>]
   envcompile targets remove <name> [--config <path>]
+  envcompile connect <target> <source...> [--public] [--config <path>]
   envcompile compile <target> --env <env> [--out <path>] [--dry-run] [--force] [--print-key] [--dotenvx <bin>]
   envcompile check [target] [--env <env>] [--dotenvx <bin>]
   envcompile lint [target] [--env <env>] [--strict] [--dotenvx <bin>]
@@ -75,6 +76,9 @@ export async function main(argv, io = defaultIo()) {
       break;
     case 'targets':
       await targetsCommand(positional, options, io);
+      break;
+    case 'connect':
+      await connectCommand(positional, options, io);
       break;
     case 'compile':
       await compileCommand(positional, options, io);
@@ -277,6 +281,28 @@ async function sourcesCommand(positional, options, io) {
     for (const file of result.files) {
       const state = file.created ? 'Created' : 'Exists';
       io.out(`${state}: ${toDisplayPath(file.filePath)}`);
+    }
+  }
+  io.out(`Config: ${toDisplayPath(result.configPath)}`);
+}
+
+async function connectCommand(positional, options, io) {
+  const targetName = positional[0];
+  const sourceNames = positional.slice(1);
+  if (!targetName) throw configError('connect requires a target.');
+  if (sourceNames.length === 0) throw configError('connect requires at least one source.');
+
+  const result = await connectSourcesToTarget(process.cwd(), options.config, {
+    targetName,
+    sourceNames,
+    publicSource: Boolean(options.public),
+  });
+
+  for (const source of result.sources) {
+    if (source.changed) {
+      io.out(`Connected ${result.type} source ${source.sourceName} to ${result.targetName}`);
+    } else {
+      io.out(`${result.type} source ${source.sourceName} is already connected to ${result.targetName}`);
     }
   }
   io.out(`Config: ${toDisplayPath(result.configPath)}`);

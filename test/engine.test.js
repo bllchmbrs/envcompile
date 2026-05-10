@@ -18,6 +18,22 @@ test('loadComposedTarget merges decrypted source files and validates required ke
   ]);
 });
 
+test('loadComposedTarget skips empty private sources without key files', async () => {
+  const fixture = await makeFixture();
+  fixture.config.targets.api.sources.unshift('empty');
+  await fs.writeFile(path.join(fixture.config.sourceDir, 'dev/.env.empty'), '');
+
+  const composed = await loadComposedTarget(fixture.config, 'api', 'dev', {
+    dotenvxBin: fixture.dotenvxBin,
+  });
+
+  assert.equal(composed.ok, true);
+  assert.deepEqual(composed.entries, [
+    ['STRIPE_SECRET_KEY', 'sk_dev'],
+    ['CLOUDFLARE_API_TOKEN', 'cf_dev'],
+  ]);
+});
+
 test('loadComposedTarget reports duplicates when duplicatePolicy is error', async () => {
   const fixture = await makeFixture({
     cloudflare: 'STRIPE_SECRET_KEY=duplicate\nCLOUDFLARE_API_TOKEN=cf_dev\n',

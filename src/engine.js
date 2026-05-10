@@ -317,20 +317,28 @@ export async function loadComposedTarget(config, targetName, env, options = {}) 
     const sourceFile = resolveSourceFile(config, env, source);
     const sourceKeyFile = resolveSourceKeyFile(config, env, source);
     await assertReadable(sourceFile, `compile ${targetName}/${env}: missing source file "${source}"`);
-    await assertReadable(sourceKeyFile, `compile ${targetName}/${env}: missing key file for source "${source}"`);
 
-    const keyText = await fs.readFile(sourceKeyFile, 'utf8');
-    const privateKeys = parsePrivateKeys(keyText);
-    if (Object.keys(privateKeys).length === 0) {
-      throw new EnvcompileError(`No DOTENV_PRIVATE_KEY entries found in ${sourceKeyFile}`, 1);
+    const sourceText = await fs.readFile(sourceFile, 'utf8');
+    if (sourceText.trim() === '') continue;
+
+    let resolvedText = sourceText;
+    if (isFileEncrypted(sourceText)) {
+      await assertReadable(sourceKeyFile, `compile ${targetName}/${env}: missing key file for source "${source}"`);
+
+      const keyText = await fs.readFile(sourceKeyFile, 'utf8');
+      const privateKeys = parsePrivateKeys(keyText);
+      if (Object.keys(privateKeys).length === 0) {
+        throw new EnvcompileError(`No DOTENV_PRIVATE_KEY entries found in ${sourceKeyFile}`, 1);
+      }
+
+      resolvedText = await decryptFile({
+        dotenvxBin: options.dotenvxBin,
+        filePath: sourceFile,
+        privateKeys,
+      });
     }
 
-    const decrypted = await decryptFile({
-      dotenvxBin: options.dotenvxBin,
-      filePath: sourceFile,
-      privateKeys,
-    });
-    const parsed = parseDotenv(decrypted);
+    const parsed = parseDotenv(resolvedText);
 
     for (const [key, value] of Object.entries(parsed)) {
       if (isPublicKeyName(key)) continue;
