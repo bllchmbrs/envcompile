@@ -6,6 +6,7 @@ import path from 'node:path';
 import { parseDotenv, parsePrivateKeys } from '../src/dotenv.js';
 import { decryptFile } from '../src/dotenvx.js';
 import { parseArgs, main } from '../src/cli.js';
+import { resolveSecretType } from '../src/secret-admin.js';
 
 test('parseArgs supports positional arguments and long options', () => {
   assert.deepEqual(parseArgs(['compile', 'api', '--env', 'prod', '--dry-run', '--out=deploy/.env']), {
@@ -30,6 +31,18 @@ test('parseArgs supports lint strict flag', () => {
   });
 });
 
+test('secret type resolves standalone configured sources', () => {
+  const config = {
+    publicDir: '/public',
+    sources: ['billing'],
+    publicSources: ['defaults'],
+    targets: {},
+  };
+
+  assert.equal(resolveSecretType(config, 'billing'), 'private');
+  assert.equal(resolveSecretType(config, 'defaults'), 'public');
+});
+
 test('init writes keysDir from project option', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-init-'));
   const origCwd = process.cwd();
@@ -45,9 +58,17 @@ test('init writes keysDir from project option', async () => {
 
     const content = await fs.readFile(path.join(tmpDir, 'envcompile.config.yaml'), 'utf8');
     assert.match(content, /keysDir: ~\/secrets\/billing-api/);
+    assert.match(content, /environments:\n\s+- dev\n\s+- prod/);
+    assert.doesNotMatch(content, /staging/);
     assert.match(content, /targets: \{\}/);
     assert.doesNotMatch(content, /stripe|cloudflare|defaults/);
     assert.ok(output.some((line) => line.includes('~/secrets/billing-api')));
+    await fs.access(path.join(tmpDir, 'source_env_vars/dev'));
+    await fs.access(path.join(tmpDir, 'source_env_vars/prod'));
+    await assert.rejects(fs.access(path.join(tmpDir, 'source_env_vars/staging')), { code: 'ENOENT' });
+    await fs.access(path.join(tmpDir, 'public_env_vars/dev'));
+    await fs.access(path.join(tmpDir, 'public_env_vars/prod'));
+    await assert.rejects(fs.access(path.join(tmpDir, 'public_env_vars/staging')), { code: 'ENOENT' });
 
     const sourcesOutput = [];
     await main(['sources'], { out: (msg) => sourcesOutput.push(msg), err: () => {} });
@@ -134,6 +155,49 @@ test('env add rejects invalid names', async () => {
       main(['env', 'add', '../build'], { out: () => {}, err: () => {} }),
       /Invalid environment name/,
     );
+  } finally {
+    process.chdir(origCwd);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('targets commands update YAML config idempotently', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envcompile-targets-'));
+  const origCwd = process.cwd();
+  process.chdir(tmpDir);
+  try {
+    await fs.writeFile(path.join(tmpDir, 'envcompile.config.yaml'), `version: 1
+
+privateDir: source_env_vars
+keysDir: keys
+
+environments:
+  - dev
+
+targets: {}
+`);
+
+    const output = [];
+    await main(['targets', 'add', 'api'], { out: (msg) => output.push(msg), err: () => {} });
+    await main(['targets', 'add', 'api'], { out: (msg) => output.push(msg), err: () => {} });
+    await main(['targets', 'add', 'web', '--output', 'compiled/{env}/.env.web', '--description', 'Web runtime'], {
+      out: (msg) => output.push(msg),
+      err: () => {},
+    });
+
+    const content = await fs.readFile(path.join(tmpDir, 'envcompile.config.yaml'), 'utf8');
+    assert.match(content, /api:\n\s+output: compiled_env\/\{env\}\/\.env\.api\n\s+sources: \[\]/);
+    assert.match(content, /web:\n\s+output: compiled\/\{env\}\/\.env\.web\n\s+sources: \[\]\n\s+description: Web runtime/);
+    assert.ok(output.some((line) => line.includes('already exists')));
+
+    const listOutput = [];
+    await main(['targets', 'list'], { out: (msg) => listOutput.push(msg), err: () => {} });
+    assert.ok(listOutput.includes('api'));
+    assert.ok(listOutput.includes('web - Web runtime'));
+
+    await main(['targets', 'remove', 'api'], { out: () => {}, err: () => {} });
+    const removedContent = await fs.readFile(path.join(tmpDir, 'envcompile.config.yaml'), 'utf8');
+    assert.doesNotMatch(removedContent, /api:/);
   } finally {
     process.chdir(origCwd);
     await fs.rm(tmpDir, { recursive: true, force: true });
@@ -273,14 +337,26 @@ targets:
 `);
 
     const output = [];
+    await main(['sources', 'add', 'audit'], { out: (msg) => output.push(msg), err: () => {} });
+    await main(['sources', 'add', 'audit'], { out: (msg) => output.push(msg), err: () => {} });
+    await main(['sources', 'add', 'shared-defaults', '--public'], { out: (msg) => output.push(msg), err: () => {} });
     await main(['sources', 'add', 'billing', '--target', 'api'], { out: (msg) => output.push(msg), err: () => {} });
     await main(['sources', 'add', 'billing', '--target', 'api'], { out: (msg) => output.push(msg), err: () => {} });
     await main(['sources', 'add', 'defaults', '--target', 'api', '--public'], { out: (msg) => output.push(msg), err: () => {} });
 
     const content = await fs.readFile(path.join(tmpDir, 'envcompile.config.yaml'), 'utf8');
     assert.equal((content.match(/billing/g) || []).length, 1);
+    assert.match(content, /^sources:\n\s+- audit/m);
+    assert.match(content, /^publicSources:\n\s+- shared-defaults/m);
     assert.match(content, /publicSources:\n\s+- defaults/);
     assert.ok(output.some((line) => line.includes('already present')));
+    assert.ok(output.some((line) => line.includes('already configured')));
+    assert.ok(output.some((line) => line.includes('Created:')));
+    assert.ok(output.some((line) => line.includes('Exists:')));
+    assert.equal(await fs.readFile(path.join(tmpDir, 'source_env_vars/dev/.env.audit'), 'utf8'), '');
+    assert.equal(await fs.readFile(path.join(tmpDir, 'source_env_vars/dev/.env.billing'), 'utf8'), '');
+    assert.equal(await fs.readFile(path.join(tmpDir, 'public_env_vars/dev/.env.shared-defaults'), 'utf8'), '');
+    assert.equal(await fs.readFile(path.join(tmpDir, 'public_env_vars/dev/.env.defaults'), 'utf8'), '');
 
     const listOutput = [];
     await main(['sources', 'list', '--target', 'api'], { out: (msg) => listOutput.push(msg), err: () => {} });
@@ -288,6 +364,13 @@ targets:
     assert.ok(listOutput.some((line) => line.includes('billing (api)')));
     assert.ok(listOutput.some((line) => line.includes('defaults (api)')));
 
+    const allOutput = [];
+    await main(['sources', 'list'], { out: (msg) => allOutput.push(msg), err: () => {} });
+    assert.ok(allOutput.some((line) => line.includes('billing (api)')));
+    assert.ok(allOutput.some((line) => line.includes('audit (no targets)')));
+    assert.ok(allOutput.some((line) => line.includes('shared-defaults (no targets)')));
+
+    await main(['sources', 'remove', 'shared-defaults', '--public'], { out: () => {}, err: () => {} });
     await main(['sources', 'remove', 'defaults', '--target', 'api', '--public'], { out: () => {}, err: () => {} });
     const removedContent = await fs.readFile(path.join(tmpDir, 'envcompile.config.yaml'), 'utf8');
     assert.doesNotMatch(removedContent, /defaults/);

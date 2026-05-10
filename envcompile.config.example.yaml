@@ -12,6 +12,13 @@ environments:
 keyFilePatterns:
   source: '{env}/.env.{source}.keys'
 
+sources:
+  - stripe
+  - cloudflare
+
+publicSources:
+  - defaults
+
 targets:
   api:
     description: Runtime env for API deployment

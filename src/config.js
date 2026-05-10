@@ -76,14 +76,26 @@ export function normalizeConfig(raw, configDir) {
     source: '{env}/.env.{source}.keys',
     ...(raw.keyFilePatterns || {}),
   };
+  if (raw.sources != null && !Array.isArray(raw.sources)) {
+    throw configError('Config sources must be an array.');
+  }
+  if (raw.publicSources != null && !Array.isArray(raw.publicSources)) {
+    throw configError('Config publicSources must be an array.');
+  }
+  if (raw.publicSources && raw.publicSources.length > 0 && !publicDir) {
+    throw configError('Config has publicSources but no publicDir is configured.');
+  }
+
+  const sources = Array.isArray(raw.sources) ? raw.sources.map(String) : [];
+  const publicSources = Array.isArray(raw.publicSources) ? raw.publicSources.map(String) : [];
 
   const targets = {};
   for (const [name, target] of Object.entries(raw.targets)) {
     if (!target || typeof target !== 'object') {
       throw configError(`Target "${name}" must be an object.`);
     }
-    if (!Array.isArray(target.sources) || target.sources.length === 0) {
-      throw configError(`Target "${name}" requires at least one source.`);
+    if (target.sources != null && !Array.isArray(target.sources)) {
+      throw configError(`Target "${name}" sources must be an array.`);
     }
     if (target.publicSources != null && !Array.isArray(target.publicSources)) {
       throw configError(`Target "${name}" publicSources must be an array.`);
@@ -124,7 +136,7 @@ export function normalizeConfig(raw, configDir) {
 
     targets[name] = {
       description: target.description || '',
-      sources: target.sources.map(String),
+      sources: Array.isArray(target.sources) ? target.sources.map(String) : [],
       publicSources: Array.isArray(target.publicSources) ? target.publicSources.map(String) : [],
       output: normalizedOutput,
       keyFile: normalizedKeyFile,
@@ -142,6 +154,8 @@ export function normalizeConfig(raw, configDir) {
     keysDir,
     environments: raw.environments.map(String),
     keyFilePatterns,
+    sources,
+    publicSources,
     targets,
   };
 }

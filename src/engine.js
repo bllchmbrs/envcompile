@@ -32,12 +32,16 @@ export async function validateConfig(config) {
     }
   }
 
+  const targetPrivateSources = new Set();
+  const targetPublicSources = new Set();
+
   // For each target × env, check source files and key files exist
   for (const [targetName, target] of Object.entries(config.targets)) {
     for (const env of config.environments) {
       const errors = [];
 
       for (const source of target.sources) {
+        targetPrivateSources.add(source);
         const sourceFile = resolveSourceFile(config, env, source);
         try {
           await fs.access(sourceFile);
@@ -54,6 +58,7 @@ export async function validateConfig(config) {
       }
 
       for (const source of target.publicSources) {
+        targetPublicSources.add(source);
         const sourceFile = resolvePublicSourceFile(config, env, source);
         try {
           await fs.access(sourceFile);
@@ -93,6 +98,52 @@ export async function validateConfig(config) {
     }
   }
 
+  for (const env of config.environments) {
+    for (const source of config.sources || []) {
+      if (targetPrivateSources.has(source)) continue;
+      const errors = [];
+      const sourceFile = resolveSourceFile(config, env, source);
+      let sourceText = null;
+      try {
+        sourceText = await fs.readFile(sourceFile, 'utf8');
+      } catch {
+        errors.push(`Missing source file: ${sourceFile}`);
+      }
+
+      if (sourceText !== null && isFileEncrypted(sourceText)) {
+        const keyFile = resolveSourceKeyFile(config, env, source);
+        try {
+          await fs.access(keyFile);
+        } catch {
+          errors.push(`Missing source key file: ${keyFile}`);
+        }
+      }
+
+      results.push({
+        label: `source:${source}/${env}`,
+        ok: errors.length === 0,
+        errors,
+      });
+    }
+
+    for (const source of config.publicSources || []) {
+      if (targetPublicSources.has(source)) continue;
+      const errors = [];
+      const sourceFile = resolvePublicSourceFile(config, env, source);
+      try {
+        await fs.access(sourceFile);
+      } catch {
+        errors.push(`Missing public source file: ${sourceFile}`);
+      }
+
+      results.push({
+        label: `public:${source}/${env}`,
+        ok: errors.length === 0,
+        errors,
+      });
+    }
+  }
+
   return results;
 }
 
@@ -102,7 +153,7 @@ export function isFileEncrypted(text) {
 
 function allSourceEnvPairs(config, options = {}) {
   const envs = options.env ? [options.env] : config.environments;
-  const allSources = new Set();
+  const allSources = new Set(config.sources || []);
   for (const target of Object.values(config.targets)) {
     for (const source of target.sources) allSources.add(source);
   }
@@ -130,8 +181,13 @@ export async function encryptSources(config, options = {}) {
     const sourceFile = resolveSourceFile(config, env, source);
     const text = await fs.readFile(sourceFile, 'utf8');
 
+    if (text.trim() === '') {
+      results.push({ env, source, skipped: true, reason: 'empty' });
+      continue;
+    }
+
     if (isFileEncrypted(text)) {
-      results.push({ env, source, skipped: true });
+      results.push({ env, source, skipped: true, reason: 'encrypted' });
       continue;
     }
 
@@ -161,7 +217,7 @@ export async function encryptSources(config, options = {}) {
       // If dotenvx didn't create .env.keys, nothing to move
     }
 
-    results.push({ env, source, skipped: false });
+    results.push({ env, source, skipped: false, reason: null });
   }
 
   return results;
@@ -356,6 +412,9 @@ export async function loadComposedTarget(config, targetName, env, options = {}) 
 
 export async function compileTarget(config, targetName, env, options = {}) {
   const composed = await loadComposedTarget(config, targetName, env, options);
+  if (composed.target.sources.length === 0 && composed.target.publicSources.length === 0) {
+    throw new EnvcompileError(`Target "${targetName}" has no sources. Add one with envcompile sources add <source> --target ${targetName}.`, 1);
+  }
   if (!composed.ok) {
     throw new EnvcompileError(formatDiagnostics(composed), 1);
   }

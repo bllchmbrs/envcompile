@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { compileTarget, lintTargets, loadComposedTarget } from '../src/engine.js';
+import { compileTarget, encryptSources, lintTargets, loadComposedTarget } from '../src/engine.js';
 
 test('loadComposedTarget merges decrypted source files and validates required keys', async () => {
   const fixture = await makeFixture();
@@ -66,6 +66,20 @@ test('lintTargets strict mode fails on duplicate keys', async () => {
   assert.equal(result.diagnostics[0].type, 'duplicate');
 });
 
+test('encryptSources skips empty configured sources', async () => {
+  const fixture = await makeFixture();
+  fixture.config.sources = ['empty'];
+  await fs.writeFile(path.join(fixture.config.sourceDir, 'dev/.env.empty'), '');
+
+  const results = await encryptSources(fixture.config, {
+    source: 'empty',
+    dotenvxBin: path.join(fixture.config.configDir, 'missing-dotenvx'),
+  });
+
+  assert.deepEqual(results, [{ env: 'dev', source: 'empty', skipped: true, reason: 'empty' }]);
+  assert.equal(await fs.readFile(path.join(fixture.config.sourceDir, 'dev/.env.empty'), 'utf8'), '');
+});
+
 test('loadComposedTarget merges public and private sources', async () => {
   const fixture = await makeFixture();
 
@@ -120,6 +134,27 @@ test('compileTarget writes encrypted output and generated key file', async () =>
   assert.deepEqual(result.privateKeys, {
     DOTENV_PRIVATE_KEY_API: 'private',
   });
+});
+
+test('compileTarget rejects targets without sources', async () => {
+  const fixture = await makeFixture();
+  fixture.config.targets.empty = {
+    description: '',
+    sources: [],
+    publicSources: [],
+    output: 'compiled_env/{env}/.env.empty',
+    keyFile: null,
+    required: [],
+    duplicatePolicy: 'error',
+    ordering: 'config',
+  };
+
+  await assert.rejects(
+    compileTarget(fixture.config, 'empty', 'dev', {
+      dotenvxBin: fixture.dotenvxBin,
+    }),
+    /has no sources/,
+  );
 });
 
 test('compileTarget defaults target key file next to output file', async () => {

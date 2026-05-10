@@ -54,6 +54,10 @@ environments:
 keyFilePatterns:
   source: '{env}/.env.{source}.keys'
 
+sources:
+  - stripe
+  - cloudflare
+
 targets:
   api:
     output: compiled_env/{env}/.env.api
@@ -66,6 +70,8 @@ targets:
     duplicatePolicy: error
     ordering: config
 ```
+
+Top-level `sources` and `publicSources` are optional. Use them for sources you want configured before they are attached to a target. Target-level `sources` and `publicSources` still define what gets compiled into each target.
 
 `output` is required and can also be a per-environment map instead of a template:
 
@@ -119,7 +125,7 @@ envcompile init
 envcompile init --project my-app
 ```
 
-`init` asks for a project name when run interactively and defaults to the current folder name. The project name is used for `keysDir`, such as `~/secrets/my-app`, and the starter config begins with no targets or sources.
+`init` asks for a project name when run interactively and defaults to the current folder name. The project name is used for `keysDir`, such as `~/secrets/my-app`, and the starter config begins with `dev` and `prod` environments and no targets or sources.
 
 List configured environments, targets, and sources:
 
@@ -135,15 +141,31 @@ Add another environment and create its source directories:
 envcompile env add build
 ```
 
-List and update the sources used by targets:
+List and update targets:
+
+```bash
+envcompile targets list
+envcompile targets add api
+envcompile targets add web --output 'compiled_env/{env}/.env.web'
+envcompile targets remove old-api
+```
+
+`targets add` creates a target with no sources. Attach sources afterward with `envcompile sources add <source> --target <target>`.
+
+List and update configured sources, or attach them to targets:
 
 ```bash
 envcompile sources list
 envcompile sources list --target api
+envcompile sources add billing
 envcompile sources add stripe --target api
+envcompile sources add defaults --public
 envcompile sources add defaults --target api --public
+envcompile sources remove billing
 envcompile sources remove defaults --target api --public
 ```
+
+`sources add` creates an empty `.env.<source>` file for each configured environment under `privateDir` or `publicDir`, without overwriting existing files. Private key files are created later when you set a private secret or encrypt the source.
 
 Set and unset values without editing config or source files by hand:
 

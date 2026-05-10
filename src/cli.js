@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { loadConfig } from './config.js';
-import { listConfiguredSources, updateEnvironment, updateSourceMembership } from './config-admin.js';
+import { listConfiguredSources, updateEnvironment, updateSourceMembership, updateTarget } from './config-admin.js';
 import {
   checkTargets,
   compareTarget,
@@ -28,7 +28,9 @@ const HELP = `envcompile
 Usage:
   envcompile init [--force] [--project <name>]
   envcompile list [--config <path>]
-  envcompile targets [--config <path>]
+  envcompile targets [list] [--config <path>]
+  envcompile targets add <name> [--output <path>] [--description <text>] [--config <path>]
+  envcompile targets remove <name> [--config <path>]
   envcompile compile <target> --env <env> [--out <path>] [--dry-run] [--force] [--print-key] [--dotenvx <bin>]
   envcompile check [target] [--env <env>] [--dotenvx <bin>]
   envcompile lint [target] [--env <env>] [--strict] [--dotenvx <bin>]
@@ -38,8 +40,8 @@ Usage:
   envcompile decrypt [source] [--env <env>] [--config <path>] [--dotenvx <bin>]
   envcompile inspect <target> --env <env> [--show-values --yes] [--dotenvx <bin>]
   envcompile sources [list] [--target <target>] [--config <path>]
-  envcompile sources add <name> --target <target> [--public] [--config <path>]
-  envcompile sources remove <name> --target <target> [--public] [--config <path>]
+  envcompile sources add <name> [--target <target>] [--public] [--config <path>]
+  envcompile sources remove <name> [--target <target>] [--public] [--config <path>]
   envcompile env add <name> [--config <path>]
   envcompile secret set <source> <KEY> --env <env> [--public|--private] [--stdin] [--config <path>] [--dotenvx <bin>]
   envcompile secret unset <source> <KEY> --env <env> [--public|--private] [--config <path>] [--dotenvx <bin>]
@@ -72,7 +74,7 @@ export async function main(argv, io = defaultIo()) {
       await sourcesCommand(positional, options, io);
       break;
     case 'targets':
-      await targetsCommand(options, io);
+      await targetsCommand(positional, options, io);
       break;
     case 'compile':
       await compileCommand(positional, options, io);
@@ -159,10 +161,8 @@ async function initCommand(options, io) {
   const projectName = await resolveInitProjectName(options, io);
   await fs.writeFile(destination, buildInitConfig(projectName), { mode: 0o644 });
   await fs.mkdir(path.resolve(process.cwd(), 'source_env_vars/dev'), { recursive: true });
-  await fs.mkdir(path.resolve(process.cwd(), 'source_env_vars/staging'), { recursive: true });
   await fs.mkdir(path.resolve(process.cwd(), 'source_env_vars/prod'), { recursive: true });
   await fs.mkdir(path.resolve(process.cwd(), 'public_env_vars/dev'), { recursive: true });
-  await fs.mkdir(path.resolve(process.cwd(), 'public_env_vars/staging'), { recursive: true });
   await fs.mkdir(path.resolve(process.cwd(), 'public_env_vars/prod'), { recursive: true });
   io.out(`Created ${toDisplayPath(destination)}`);
   io.out(`Private keys: ~/secrets/${projectName}`);
@@ -177,7 +177,6 @@ keysDir: ~/secrets/${projectName}
 
 environments:
   - dev
-  - staging
   - prod
 
 keyFilePatterns:
@@ -250,7 +249,6 @@ async function sourcesCommand(positional, options, io) {
   }
   const sourceName = positional[1];
   if (!sourceName) throw configError(`sources ${subcommand} requires a source name.`);
-  if (!options.target) throw configError(`sources ${subcommand} requires --target <target>.`);
 
   const result = await updateSourceMembership(process.cwd(), options.config, {
     action: subcommand,
@@ -261,15 +259,61 @@ async function sourcesCommand(positional, options, io) {
 
   if (result.changed) {
     const verb = subcommand === 'add' ? 'Added' : 'Removed';
-    io.out(`${verb} ${result.type} source ${result.sourceName} ${subcommand === 'add' ? 'to' : 'from'} ${result.targetName}`);
+    if (result.targetName) {
+      io.out(`${verb} ${result.type} source ${result.sourceName} ${subcommand === 'add' ? 'to' : 'from'} ${result.targetName}`);
+    } else {
+      io.out(`${verb} ${result.type} source ${result.sourceName}`);
+    }
   } else {
-    const state = subcommand === 'add' ? 'already present in' : 'not present in';
-    io.out(`${result.type} source ${result.sourceName} is ${state} ${result.targetName}`);
+    if (result.targetName) {
+      const state = subcommand === 'add' ? 'already present in' : 'not present in';
+      io.out(`${result.type} source ${result.sourceName} is ${state} ${result.targetName}`);
+    } else {
+      const state = subcommand === 'add' ? 'already configured' : 'not configured';
+      io.out(`${result.type} source ${result.sourceName} is ${state}`);
+    }
+  }
+  if (result.files && result.files.length > 0) {
+    for (const file of result.files) {
+      const state = file.created ? 'Created' : 'Exists';
+      io.out(`${state}: ${toDisplayPath(file.filePath)}`);
+    }
   }
   io.out(`Config: ${toDisplayPath(result.configPath)}`);
 }
 
-async function targetsCommand(options, io) {
+async function targetsCommand(positional, options, io) {
+  const subcommand = positional[0] || 'list';
+  if (subcommand === 'list') {
+    await listTargetsCommand(options, io);
+    return;
+  }
+
+  if (!['add', 'remove'].includes(subcommand)) {
+    throw configError(`Unknown targets command "${subcommand}". Run envcompile --help.`);
+  }
+  const targetName = positional[1];
+  if (!targetName) throw configError(`targets ${subcommand} requires a target name.`);
+
+  const result = await updateTarget(process.cwd(), options.config, {
+    action: subcommand,
+    targetName,
+    output: options.output,
+    description: options.description,
+  });
+
+  if (result.changed) {
+    const verb = subcommand === 'add' ? 'Added' : 'Removed';
+    io.out(`${verb} target ${result.targetName}`);
+    if (subcommand === 'add') io.out(`Output: ${result.output}`);
+  } else {
+    const state = subcommand === 'add' ? 'already exists' : 'does not exist';
+    io.out(`Target ${result.targetName} ${state}`);
+  }
+  io.out(`Config: ${toDisplayPath(result.configPath)}`);
+}
+
+async function listTargetsCommand(options, io) {
   const { config } = await loadConfig(process.cwd(), options.config);
   for (const [name, target] of Object.entries(config.targets)) {
     const suffix = target.description ? ` - ${target.description}` : '';
@@ -410,7 +454,8 @@ async function encryptCommand(positional, options, io) {
 
   for (const result of results) {
     if (result.skipped) {
-      io.out(`skip ${result.env}/${result.source} (already encrypted)`);
+      const reason = result.reason === 'empty' ? 'empty' : 'already encrypted';
+      io.out(`skip ${result.env}/${result.source} (${reason})`);
     } else {
       io.out(`encrypted ${result.env}/${result.source}`);
     }
@@ -551,7 +596,8 @@ function renderSourceSection(label, sources, io) {
     return;
   }
   for (const source of sources) {
-    io.out(`  ${source.name} (${source.targets.join(', ')})`);
+    const targets = source.targets.length > 0 ? source.targets.join(', ') : 'no targets';
+    io.out(`  ${source.name} (${targets})`);
   }
 }
 
@@ -784,8 +830,8 @@ async function gitignoreCommand(options, io) {
   const { config } = await loadConfig(process.cwd(), options.config);
   const sourceDir = config.sourceDir;
 
-  // Collect all source names from all targets
-  const allSources = new Set();
+  // Collect configured private source names, including target memberships.
+  const allSources = new Set(config.sources);
   for (const target of Object.values(config.targets)) {
     for (const source of target.sources) allSources.add(source);
   }

@@ -174,6 +174,8 @@ async function mutatePrivateSecret(config, options) {
 function findSourceUsage(config, sourceName) {
   const privateTargets = [];
   const publicTargets = [];
+  if ((config.sources || []).includes(sourceName)) privateTargets.push(null);
+  if ((config.publicSources || []).includes(sourceName)) publicTargets.push(null);
   for (const [targetName, target] of Object.entries(config.targets)) {
     if (target.sources.includes(sourceName)) privateTargets.push(targetName);
     if (target.publicSources.includes(sourceName)) publicTargets.push(targetName);
